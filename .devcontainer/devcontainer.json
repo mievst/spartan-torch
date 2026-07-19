@@ -8,7 +8,7 @@
       "PYTHON_VERSION": "3.13"
     }
   },
-  "initializeCommand": "uv sync --extra dev --extra bench",
+
   "postCreateCommand": "echo 'spartan-torch devcontainer ready!' && python -c \"import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.version.cuda}')\"",
   "postStartCommand": "uv sync --extra dev --extra bench",
   "features": {
@@ -28,7 +28,7 @@
         "github.vscode-pull-request-github"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff",
           "editor.formatOnSave": true,
@@ -50,8 +50,8 @@
   },
   "mounts": [
     "source=${localWorkspaceFolder}/data,target=/workspace/data,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.cache/huggingface,target=/root/.cache/huggingface,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.config/wandb,target=/root/.config/wandb,type=bind,consistency=cached"
+    "source=${localEnv:USERPROFILE}/.cache/huggingface,target=/root/.cache/huggingface,type=bind,consistency=cached",
+    "source=${localEnv:USERPROFILE}/.config/wandb,target=/root/.config/wandb,type=bind,consistency=cached"
   ],
   "remoteEnv": {
     "PYTHONPATH": "/workspace/src",

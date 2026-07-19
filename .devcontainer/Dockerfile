@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: MIT
 # spartan-torch Development Container
-# CUDA 13.3
 
-FROM nvidia/cuda:13.3.0-tensorrt-devel-ubuntu24.04
+ARG CUDA_VERSION=12.4.1
+ARG UBUNTU_VERSION=22.04
+ARG PYTHON_VERSION=3.13
+ARG TARGETPLATFORM
+FROM --platform=${TARGETPLATFORM} ghcr.io/astral-sh/uv:latest AS uv
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+FROM --platform=${TARGETPLATFORM} nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+COPY --from=uv /uv /uvx /bin/
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,12 +28,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenmpi-dev \
     openmpi-bin \
     && rm -rf /var/lib/apt/lists/*
-
-# Create virtual environment
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-ENV VIRTUAL_ENV="/opt/venv"
-
 
 
 # Configure git safe directory

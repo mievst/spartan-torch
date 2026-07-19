@@ -1,0 +1,74 @@
+{
+  "name": "spartan-torch",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "CUDA_VERSION": "12.4.1",
+      "UBUNTU_VERSION": "22.04",
+      "PYTHON_VERSION": "3.13"
+    }
+  },
+  "initializeCommand": "uv sync --extra dev --extra bench",
+  "postCreateCommand": "echo 'spartan-torch devcontainer ready!' && python -c \"import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.version.cuda}')\"",
+  "postStartCommand": "uv sync --extra dev --extra bench",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "astral-sh.ruff",
+        "charliermarsh.ruff",
+        "ms-python.python",
+        "ms-vscode.makefile-tools",
+        "redhat.vscode-yaml",
+        "streetsidesoftware.code-spell-checker",
+        "github.vscode-pull-request-github"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports.ruff": "explicit",
+            "source.fixAll.ruff": "explicit"
+          }
+        },
+        "files.associations": {
+          "*.py": "python"
+        }
+      }
+    }
+  },
+  "forwardPorts": [6006, 8888],
+  "portsAttributes": {
+    "6006": { "label": "TensorBoard", "onAutoForward": "notify" },
+    "8888": { "label": "Jupyter", "onAutoForward": "notify" }
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/data,target=/workspace/data,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.cache/huggingface,target=/root/.cache/huggingface,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.config/wandb,target=/root/.config/wandb,type=bind,consistency=cached"
+  ],
+  "remoteEnv": {
+    "PYTHONPATH": "/workspace/src",
+    "CUDA_VISIBLE_DEVICES": "all",
+    "TORCH_CUDA_ARCH_LIST": "8.0;8.6;8.9;9.0",
+    "TRITON_CACHE_DIR": "/workspace/.triton_cache",
+    "UV_CACHE_DIR": "/workspace/.uv_cache"
+  },
+  "runArgs": [
+    "--gpus", "all",
+    "--shm-size", "8g",
+    "--ulimit", "memlock=-1",
+    "--ulimit", "stack=67108864"
+  ],
+  "containerEnv": {
+    "DEBIAN_FRONTEND": "noninteractive",
+    "PYTHONUNBUFFERED": "1",
+    "UV_LINK_MODE": "copy"
+  }
+}

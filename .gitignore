@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: MIT
+# spartan-torch .gitignore
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# UV
+.uv_cache/
+uv.lock
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+pytestdebug.log
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright_cache/
+.basedpyright_cache/
+
+# Ruff
+.ruff_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Wandb
+wandb/
+
+# TensorBoard
+runs/
+tensorboard/
+
+# Datasets
+data/
+datasets/
+*.arrow
+*.parquet
+
+# Model checkpoints
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Triton cache
+.triton_cache/
+
+# Benchmark results
+benchmarks/results/
+benchmark-*.json
+comparison-report.json
+regression-report.json
+
+# Profiler output
+*.prof
+trace.json
+snapshot.pkl
+
+# Documentation build
+site/
+docs/_build/
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Local development
+local/
+tmp/
+temp/
+*.tmp
+
+# Pre-commit
+.pre-commit-config.yaml.bak
+
+# Cython
+*.so
+*.c
+
+# C extensions
+*.pyd
+
+# Coverage threshold badge
+coverage-badge.svg

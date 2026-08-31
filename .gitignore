@@ -89,6 +89,9 @@ logs/
 # Wandb
 wandb/
 
+# MLflow local artifacts
+mlruns/
+
 # TensorBoard
 runs/
 tensorboard/
@@ -148,3 +151,4 @@ temp/
 
 # Coverage threshold badge
 coverage-badge.svg
+_check_nb.py

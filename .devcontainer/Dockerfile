@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: MIT
 # spartan-torch Development Container
 
-ARG CUDA_VERSION=12.4.1
-ARG UBUNTU_VERSION=22.04
+ARG CUDA_VERSION=13.2.1
+ARG UBUNTU_VERSION=24.04
 ARG PYTHON_VERSION=3.13
 ARG TARGETPLATFORM
 FROM --platform=${TARGETPLATFORM} ghcr.io/astral-sh/uv:latest AS uv
 
 FROM --platform=${TARGETPLATFORM} nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+ARG JUST_VERSION=1.57.0
 COPY --from=uv /uv /uvx /bin/
 
 # Prevent interactive prompts
@@ -30,8 +31,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 
-# Configure git safe directory
-RUN git config --global --add safe.directory /workspace
+# Configure git safe directory (repo path depends on workspace mount point)
+RUN git config --global --add safe.directory '*'
+
+# Install just (task runner) — pinned, from GitHub releases
+RUN curl -sSfL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+    | tar xzf - -C /usr/local/bin just
 
 # Set up Triton cache
 ENV TRITON_CACHE_DIR=/workspace/.triton_cache

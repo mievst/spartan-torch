@@ -3,18 +3,16 @@
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "CUDA_VERSION": "12.4.1",
-      "UBUNTU_VERSION": "22.04",
+      "CUDA_VERSION": "13.2.1",
+      "UBUNTU_VERSION": "24.04",
       "PYTHON_VERSION": "3.13"
     }
   },
 
-  "postCreateCommand": "echo 'spartan-torch devcontainer ready!' && python -c \"import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.version.cuda}')\"",
-  "postStartCommand": "uv sync --extra dev --extra bench",
+  "postCreateCommand": "uv sync --extra dev --extra experiments && .venv/bin/python -c \"import torch; print(f'spartan-torch devcontainer ready! PyTorch {torch.__version__}, CUDA {torch.version.cuda}')\"",
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
   "customizations": {
     "vscode": {
@@ -22,13 +20,13 @@
         "astral-sh.ruff",
         "charliermarsh.ruff",
         "ms-python.python",
-        "ms-vscode.makefile-tools",
+        "nefrob.vscode-just",
         "redhat.vscode-yaml",
         "streetsidesoftware.code-spell-checker",
         "github.vscode-pull-request-github"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff",
           "editor.formatOnSave": true,
@@ -53,11 +51,10 @@
     "source=${localEnv:USERPROFILE}/.config/wandb,target=/root/.config/wandb,type=bind,consistency=cached"
   ],
   "remoteEnv": {
-    "PYTHONPATH": "/workspace/src",
-    "CUDA_VISIBLE_DEVICES": "all",
+    "PYTHONPATH": "${containerWorkspaceFolder}/src",
     "TORCH_CUDA_ARCH_LIST": "8.0;8.6;8.9;9.0",
-    "TRITON_CACHE_DIR": "/workspace/.triton_cache",
-    "UV_CACHE_DIR": "/workspace/.uv_cache"
+    "TRITON_CACHE_DIR": "${containerWorkspaceFolder}/.triton_cache",
+    "UV_CACHE_DIR": "${containerWorkspaceFolder}/.uv_cache"
   },
   "runArgs": [
     "--gpus", "all",

@@ -17,6 +17,15 @@
 их берём из `torchvision`/`huggingface` с предобученными весами. Библиотека
 свободна от тяжёлых трейн-фреймворков: ядро зависит только от Torch.
 
+## Parity и бенчмарки
+
+- [`RESULTS.md`](RESULTS.md) — воспроизводимость: parity своих примитивов с
+  timm/torchvision (ViT-Base/16, ResNet-18) и sweep субквадратичных вниманий
+  (latency/память, Pareto). Таблицы генерируются скриптами, руками не правятся:
+  `scripts/verify_pretrained.py`, `scripts/bench_attention.py`.
+- Ключ-маппинги весов — `src/spartan_torch/compat/`; полных сетей в библиотеке
+  нет, compat-сборки живут в `tests/test_weight_parity.py`.
+
 ## Установка
 
 Требуется Python **3.13+** (и CUDA-совместимый Torch — см. ниже).
@@ -46,6 +55,9 @@ pip install -e ".[experiments,dev]"
 ```bash
 just sync   # установить/синхронизировать окружение (uv sync --extra dev --extra experiments)
 just test   # прогнать тесты (venv-Python -m pytest)
+just parity # parity-тесты весов (timm/torchvision; pretrained тянет веса из сети)
+just verify # обновить parity-таблицу в RESULTS.md
+just bench  # GPU-бенч вниманий + Pareto-график (требует CUDA)
 just clean  # удалить .venv
 ```
 

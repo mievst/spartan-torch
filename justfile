@@ -16,6 +16,18 @@ venv_python := if os_family() == "windows" {
 test:
     {{venv_python}} -m pytest
 
+# Reference weight parity (needs timm/torchvision; -pretrained needs network).
+parity:
+    {{venv_python}} -m pytest tests/test_weight_parity.py tests/test_sdpa_parity.py -m "parity or pretrained"
+
+# Refresh RESULTS.md parity table (downloads reference weights once).
+verify:
+    {{venv_python}} scripts/verify_pretrained.py --write-results
+
+# GPU attention sweep: latency + peak memory + Pareto plot (needs CUDA).
+bench:
+    {{venv_python}} scripts/bench_attention.py --write-results
+
 # Install / reconcile the virtual environment from the lockfile.
 sync:
     uv sync --extra dev --extra experiments

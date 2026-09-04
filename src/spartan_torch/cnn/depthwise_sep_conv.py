@@ -38,6 +38,11 @@ class DepthwiseSeparableConv(nn.Module):
         created, unlike ResNet blocks).
     dropout_p : float | None, default=None
         Dropout probability after the second BN. ``None`` disables dropout.
+
+    References
+    ----------
+    "MobileNets: Efficient Convolutional Neural Networks for Mobile Vision
+    Applications" (Howard et al., 2017, arXiv:1704.04861).
     """
 
     def __init__(

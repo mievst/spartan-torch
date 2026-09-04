@@ -20,6 +20,11 @@ class ChunkedFeedForward(nn.Module):
     chunk_size : int, default=1024
         Sequence chunk length. ``ff`` is called once when ``seq_len`` does not
         exceed ``chunk_size``.
+
+    References
+    ----------
+    "Reformer: The Efficient Transformer" (Kitaev, Kaiser & Levskaya, 2020,
+    arXiv:2001.04451) — chunked feed-forward for long sequences.
     """
 
     def __init__(self, ff: nn.Module, chunk_size: int = 1024):
@@ -92,6 +97,11 @@ class ReversibleBlock(nn.Module):
     use_checkpoint : bool, default=False
         Wrap the forward in :func:`torch.utils.checkpoint.checkpoint` during
         training (ignored in evaluation).
+
+    References
+    ----------
+    "Reformer: The Efficient Transformer" (Kitaev, Kaiser & Levskaya, 2020,
+    arXiv:2001.04451).
     """
 
     def __init__(

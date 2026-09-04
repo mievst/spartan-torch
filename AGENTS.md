@@ -18,6 +18,8 @@ spartan-torch — библиотека кастомных слоёв и вспо
 
 **Решение по трейн-лупу в экспериментах (2026-08):** NLP-задачи идут на HF `transformers` (Trainer + PreTrainedModel, см. `experiments/llm/tinyllama/`), CV — на `pytorch-lightning` (см. `experiments/image_classification/`). Оба фреймворка — зависимости extra `experiments`; сама библиотека `spartan_torch` свободна от обоих.
 
+**Формат экспериментов:** пайплайн — `.ipynb` (`data/` и `checkpoints/` в .gitignore, опциональный MLflow). Простые модели инлайнятся прямо в ноутбук (см. `vit_cifar10/`); нетривиальные модели и трейн-обвязки выносятся в `.py` рядом с ноутбуком, который их импортирует (см. `vit/mae/`, `vit/dino/` — по паттерну `llm/tinyllama/`). Код в `.py` — для тестов, dry-run'ов и читаемых diff; ноутбук несёт только данные, трейн-луп и eval.
+
 **Что НЕ входит (важно):**
 - Реимплементация стандартных моделей (ResNet, VGG, transformers) — их берём из `torchvision`/`huggingface` с предобученными весами
 - Дублирование того, что уже есть в `torch.nn` без добавленной ценности
@@ -45,3 +47,38 @@ spartan-torch — библиотека кастомных слоёв и вспо
 6. **Вердикт** — что гарантируем как совместимое, где грань между «совместимо с X» и «не зависит от X» (библиотека `spartan_torch` остаётся свободной от тяжёлых фреймворков).
 
 Цель: написанные модели переносятся в реальный пайплайн (HF Trainer, PL, экспорт) без переписывания.
+
+## Rule: parity coverage
+
+Новый слой с референсом в `torch.nn`/timm/torchvision/HF обязан иметь:
+
+1. **Key-mapping** — чистая функция `state_dict → (remapped, report)` в `src/spartan_torch/compat/` (без тяжёлых импортов на уровне модуля; `timm`/`transformers` импортирует вызывающий). Полные сети в `src` запрещены — compat-сборки живут только в `tests/test_weight_parity.py`.
+2. **Numeric parity-тест** — `tests/test_weight_parity.py` (веса) / `tests/test_sdpa_parity.py` (математика слоя): CPU, fp32, eval, фиксированный сид. Gate: `max abs diff < 1e-5`, `cosine > 0.99999`. Маркеры: `parity` (нужны ref-библиотеки), `pretrained` (нужна сеть для скачивания весов; без сети — skip, не fail).
+3. **Запись в RESULTS.md** — через `scripts/verify_pretrained.py --write-results` (parity) — руками таблицу не править. Рядом — реестр воспроизведённых архитектур.
+4. **Границы честности** — norm `eps`, bias QKV/out, activation должны совпадать с референсом до сравнения (пример: timm `LayerNorm(eps=1e-6)` vs дефолт `1e-5` даёт ~1e-3 дрейфа за 12 блоков). Несовпадение конфигурации — баг маппинга, не «шум».
+
+Без пп.1–3 PR не мержится.
+
+## Rule: benchmark methodology
+
+Замеры в `scripts/bench_attention.py` (ноутбуки — только для просмотра, не хранилище методологии):
+
+1. **Окружение** — только CUDA; CPU-замеры недействительны. `eval + no_grad`, фиксированные сид/batch/dtype.
+2. **Протокол** — warmup 10, median из 30, `torch.cuda.synchronize()` вокруг каждой итерации; `reset_peak_memory_stats()` до секции, `max_memory_allocated()` после.
+3. **SPILL** — `peak > total_memory` означает пейджинг (WDDM shared memory), а не GPU-замер: ячейка помечается `SPILL`, latency инвалидируется. OOM — пустая ячейка, sweep продолжается.
+4. **Артефакты** — сырой CSV (`bench/results_attention.csv`, шапка окружения первой строкой) и Pareto-график (`bench/pareto_seq_latency_mem.png`) коммитятся; таблица в RESULTS.md — только через `--write-results`.
+5. **CI** — бенчи вне unit-CI: ручной dispatch / расписание, GPU-раннер.
+
+## Rule: docstring references
+
+Каждый слой в `src/` несёт `References` с arXiv-id первоисточника
+(формат: `"Title" (Authors, year, arXiv:xxxx.xxxxx).`). Проверка — грепом
+`arXiv` по `src/`; нет ссылки — нет мержа. Утилиты без прямой статьи
+ссылаются на ближайшую практику (warmup → Vaswani et al., 2017).
+
+## Rule: version bumps
+
+Версия в `pyproject.toml` меняется только по явному согласованию с
+мейнтейнером. Агенту запрещено самому бампать версию (даже «очевидный»
+minor за новую фичу) — предложить, дождаться подтверждения. Сейчас `0.0.1`:
+публичного релиза ещё не было, счёт не начат.

@@ -25,6 +25,11 @@ class RMSNorm(nn.Module):
         Add a learnable bias. ``nn.LayerNorm`` always has one; RMSNorm
         commonly omits it, but ``bias=True`` reproduces the affine set
         (weight + bias) so checkpoints can be swapped 1-to-1.
+
+    References
+    ----------
+    "Root Mean Square Layer Normalization" (Zhang & Sennrich, 2019,
+    arXiv:1910.07467).
     """
 
     def __init__(self, normalized_shape: int | tuple[int, ...], eps: float = 1e-5, bias: bool = False):

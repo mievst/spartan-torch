@@ -42,6 +42,11 @@ class InvertedResidual(nn.Module):
         Effective only when ``stride == 1`` and ``in_c == out_c``.
     dropout_p : float | None, default=None
         Dropout probability after the projection BN. ``None`` disables dropout.
+
+    References
+    ----------
+    "MobileNetV2: Inverted Residuals and Linear Bottlenecks" (Sandler et al.,
+    2018, arXiv:1801.04381).
     """
 
     def __init__(

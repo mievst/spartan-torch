@@ -13,6 +13,11 @@ class ClassToken(nn.Module):
     ----------
     embed_dim : int
         Embedding dimension of the input tokens.
+
+    References
+    ----------
+    "An Image is Worth 16x16 Words: Transformers for Image Recognition at
+    Scale" (Dosovitskiy et al., 2020, arXiv:2010.11929).
     """
 
     def __init__(self, embed_dim: int):

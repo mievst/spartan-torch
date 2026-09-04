@@ -1,16 +1,30 @@
 [project]
 name = "spartan-torch"
-version = "0.1.0"
+version = "0.0.1"
 description = "Custom layers and building blocks for PyTorch — assemble and fine-tune models fast"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "mievst" }]
+keywords = ["pytorch", "deep-learning", "transformer", "attention", "vision-transformer", "fine-tuning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "torch>=2.13.0",
     "torchvision>=0.28.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mievst/spartan-torch"
+Repository = "https://github.com/mievst/spartan-torch"
+Issues = "https://github.com/mievst/spartan-torch/issues"
 
 [project.scripts]
 spartan-torch = "spartan_torch:main"
@@ -39,6 +53,11 @@ experiments = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "parity: reference weight-parity tests (need timm/torchvision)",
+    "pretrained: needs network to download reference weights",
+    "bench: micro-benchmarks (need GPU, not run in unit CI)",
+]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu132" }
@@ -50,5 +69,5 @@ url = "https://download.pytorch.org/whl/cu132"
 explicit = true
 
 [build-system]
-requires = ["uv_build>=0.11.0"]
+requires = ["uv_build>=0.11.0,<0.12"]
 build-backend = "uv_build"

@@ -28,6 +28,11 @@ class ResidualBlock(nn.Module):
         When True, adds residual connection. When False, block acts as plain conv stack.
     dropout_p : float | None, default=None
         Dropout probability after second BN. ``None`` disables dropout.
+
+    References
+    ----------
+    "Deep Residual Learning for Image Recognition" (He et al., 2015,
+    arXiv:1512.03385).
     """
 
     def __init__(

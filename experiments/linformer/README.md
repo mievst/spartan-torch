@@ -1,5 +1,11 @@
 # linformer — сравнительный бенчмарк субквадратичных вниманий
 
+> Канонические замеры переехали: `scripts/bench_attention.py` (методология —
+> AGENTS.md "benchmark methodology"), цифры — `RESULTS.md` + `bench/`.
+> Ноутбук `benchmark.ipynb` и таблица ниже — legacy-слепок (batch=1,
+> fwd+bwd, `proj_k=128`, `n_hashes=8`); для новых сравнений гонять скрипт,
+> не ноутбук.
+
 Единый стенд для трёх семейств линейного/сублинейного внимания +
 квадратичного baseline. Слои — из `spartan_torch`:
 

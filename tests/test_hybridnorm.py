@@ -16,6 +16,46 @@ def reference_hybrid_block(block, x):
     return h2 + block.ff(h2)
 
 
+def reference_post_block(block, x):
+    h, _ = block.attn(x, x, x)
+    h = block.norm1(block.adapt_residual(x) + h)
+    return block.norm2(h + block.ff(h))
+
+
+class TestPostNorm:
+    def test_shapes(self):
+        block = TransformerBlock(64, 16, 4, 64, 256, norm_mode="post")
+        assert block(torch.randn(2, 10, 64))[0].shape == (2, 10, 64)
+
+    def test_matches_reference(self):
+        block = TransformerBlock(64, 16, 4, 64, 256, norm_mode="post").eval()
+        torch.manual_seed(0)
+        x = torch.randn(2, 10, 64)
+        with torch.no_grad():
+            assert close(block(x)[0], reference_post_block(block, x), tol=1e-6)
+
+    def test_differs_from_pre_norm(self):
+        torch.manual_seed(0)
+        x = torch.randn(2, 10, 64)
+        pre = TransformerBlock(64, 16, 4, 64, 256, norm_mode="pre").eval()
+        post = TransformerBlock(64, 16, 4, 64, 256, norm_mode="post").eval()
+        post.load_state_dict(pre.state_dict())
+        with torch.no_grad():
+            assert not close(pre(x)[0], post(x)[0])
+
+    def test_gradient_flows(self):
+        block = TransformerBlock(64, 16, 4, 64, 256, norm_mode="post")
+        x = torch.randn(2, 10, 64, requires_grad=True)
+        block(x)[0].sum().backward()
+        assert x.grad is not None
+        assert all(p.grad is not None for p in block.parameters())
+
+    def test_norms_are_real_not_identity(self):
+        block = TransformerBlock(64, 16, 4, 64, 256, norm_mode="post")
+        assert isinstance(block.norm1, nn.LayerNorm)
+        assert isinstance(block.norm2, nn.LayerNorm)
+
+
 class TestRMSNorm:
     def test_shape_preserved(self):
         norm = RMSNorm(64)
@@ -214,8 +254,8 @@ class TestHybridBlock:
         assert block.attn.qkv_norm.norm_q.weight.grad is not None
 
     def test_invalid_norm_mode(self):
-        with pytest.raises(ValueError):
-            TransformerBlock(64, 16, 4, 64, 256, norm_mode="post")
+        with pytest.raises(ValueError, match="norm_mode"):
+            TransformerBlock(64, 16, 4, 64, 256, norm_mode="sandwich")
 
     def test_hybrid_cross_attn_shapes(self):
         block = TransformerBlock(64, 16, 4, 64, 256, norm_mode="hybrid",

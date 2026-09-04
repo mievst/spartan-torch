@@ -165,6 +165,11 @@ class PerformerAdapter(nn.Module):
         lengths.
     ortho_scaling : int, default=0
         ORF row-norm scheme, see :class:`PerformerAttention`.
+
+    References
+    ----------
+    "Rethinking Attention with Performers" (Choromanski et al., 2020,
+    arXiv:2009.14794).
     """
 
     def __init__(

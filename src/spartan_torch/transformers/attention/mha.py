@@ -169,6 +169,14 @@ class MultiHeadAttention(nn.Module):
         Normalization factory for the QKV-norm stage, called with
         ``head_size``. Ignored unless ``qkv_norm=True``. Pass RMSNorm to
         reproduce the paper exactly.
+    qkv_bias : bool, default=False
+        Add biases to the query/key/value projections. ``False`` matches the
+        efficient default (LLaMA-style, no QKV bias); ``True`` reproduces
+        timm/HF ViT checkpoints (``attn.qkv.bias``), whose fused QKV Linear
+        carries a bias that must be split across the three heads.
+    out_bias : bool, default=True
+        Add a bias to the output projection (matches ``nn.Linear`` default
+        and timm ``attn.proj.bias``).
     """
 
     def __init__(
@@ -185,6 +193,8 @@ class MultiHeadAttention(nn.Module):
         qk_mod: Callable[[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None = None,
         qkv_norm: bool = False,
         qkv_norm_layer: Callable[[int], nn.Module] = nn.LayerNorm,
+        qkv_bias: bool = False,
+        out_bias: bool = True,
     ):
         super().__init__()
         num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
@@ -200,6 +210,8 @@ class MultiHeadAttention(nn.Module):
         self.attn_p = attn_p
         self.is_causal = is_causal
         self.use_sdpa = use_sdpa
+        self.qkv_bias = qkv_bias
+        self.out_bias = out_bias
         # Plain attribute, not an nn.Module child: qk_mod is a stateless hook
         # and the caller owns its state. Registering it here would duplicate
         # the same module (and its buffers) once per attention block, and
@@ -210,10 +222,10 @@ class MultiHeadAttention(nn.Module):
         # module tree to be saved/moved with it.
         self.qkv_norm = QKVNorm(head_size, qkv_norm_layer) if qkv_norm else None
 
-        self.query_matrix = nn.Linear(self.query_in_size, head_size * num_heads, bias=False)
-        self.key_matrix = nn.Linear(self.in_size, head_size * num_kv_heads, bias=False)
-        self.value_matrix = nn.Linear(self.in_size, head_size * num_kv_heads, bias=False)
-        self.out = nn.Linear(head_size * num_heads, out_size)
+        self.query_matrix = nn.Linear(self.query_in_size, head_size * num_heads, bias=qkv_bias)
+        self.key_matrix = nn.Linear(self.in_size, head_size * num_kv_heads, bias=qkv_bias)
+        self.value_matrix = nn.Linear(self.in_size, head_size * num_kv_heads, bias=qkv_bias)
+        self.out = nn.Linear(head_size * num_heads, out_size, bias=out_bias)
 
     def forward(
         self,

@@ -37,6 +37,12 @@ class CrossAttentionBlock(nn.Module):
         Dropout probability on the residual branch.
     use_sdpa : bool, default=False
         Route attention through ``F.scaled_dot_product_attention``.
+    qkv_bias : bool, default=False
+        Add biases to the attention QKV projections (HF checkpoints need
+        ``True``). Passed to the default :class:`MultiHeadAttention`; ignored
+        when ``attn_layer`` is injected.
+    out_bias : bool, default=True
+        Add a bias to the attention output projection.
     attn_layer : nn.Module | None, default=None
         Attention sublayer instance. ``None`` builds the default
         :class:`MultiHeadAttention` from ``num_kv_heads``/``use_sdpa`` (which
@@ -45,6 +51,11 @@ class CrossAttentionBlock(nn.Module):
         instance must accept ``(query, key, value, mask=...)`` and return
         either a tensor or an ``(output, cache)`` tuple. A single instance
         passed to several blocks shares weights.
+
+    References
+    ----------
+    "Attention Is All You Need" (Vaswani et al., 2017, arXiv:1706.03762) —
+    encoder-decoder attention.
     """
 
     def __init__(
@@ -59,6 +70,8 @@ class CrossAttentionBlock(nn.Module):
         attn_p: float = 0.0,
         dropout_p: float = 0.0,
         use_sdpa: bool = False,
+        qkv_bias: bool = False,
+        out_bias: bool = True,
         attn_layer: nn.Module | None = None,
     ):
         super().__init__()
@@ -76,6 +89,8 @@ class CrossAttentionBlock(nn.Module):
                 num_kv_heads=num_kv_heads,
                 attn_p=attn_p,
                 use_sdpa=use_sdpa,
+                qkv_bias=qkv_bias,
+                out_bias=out_bias,
             )
         )
         self.adapt_residual = nn.Linear(query_size, out_size) if query_size != out_size else nn.Identity()

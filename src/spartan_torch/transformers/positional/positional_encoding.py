@@ -18,6 +18,10 @@ class PositionalEncoding(nn.Module):
         Embedding dimension.
     max_seq_len : int, default=5000
         Maximum supported sequence length.
+
+    References
+    ----------
+    "Attention Is All You Need" (Vaswani et al., 2017, arXiv:1706.03762).
     """
 
     def __init__(self, emb_size: int, max_seq_len: int = 5000):

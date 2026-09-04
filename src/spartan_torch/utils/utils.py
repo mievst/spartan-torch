@@ -3,6 +3,29 @@ import torch
 
 
 class WarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
+    """Cosine warmup wrapper around another LR scheduler.
+
+    For the first ``warmup`` steps the LR ramps from ``min_lr`` to the base
+    LR on a cosine curve, then delegates to ``scheduler``. Warmup stabilizes
+    early training of deep transformers (post-norm especially).
+
+    Parameters
+    ----------
+    optimizer : torch.optim.Optimizer
+        Optimizer whose LR is scheduled.
+    warmup : int
+        Number of warmup steps.
+    scheduler : torch.optim.lr_scheduler._LRScheduler
+        Scheduler to delegate to after warmup.
+    min_lr : float, default=1e-9
+        LR floor at the start of warmup.
+
+    References
+    ----------
+    "Attention Is All You Need" (Vaswani et al., 2017, arXiv:1706.03762) —
+    the warmup schedule (Sec 5.3).
+    """
+
     def __init__(self, optimizer, warmup, scheduler, min_lr=1e-9):
         self.warmup = warmup
         self.scheduler = scheduler

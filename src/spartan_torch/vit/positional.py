@@ -19,6 +19,11 @@ class LearnablePositionEmbedding(nn.Module):
         Maximum sequence length (number of patches + 1 for CLS token).
     embed_dim : int
         Embedding dimension per token.
+
+    References
+    ----------
+    "An Image is Worth 16x16 Words: Transformers for Image Recognition at
+    Scale" (Dosovitskiy et al., 2020, arXiv:2010.11929), Sec 3.1.
     """
 
     def __init__(self, max_len: int, embed_dim: int):

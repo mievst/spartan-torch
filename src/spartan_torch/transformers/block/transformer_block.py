@@ -121,11 +121,14 @@ class TransformerBlock(nn.Module):
         ``ff_layer`` is provided.
     norm_layer : Callable[[int], nn.Module], default=nn.LayerNorm
         Normalization factory called with the embedding size.
-    norm_mode : Literal["pre", "hybrid"], default="pre"
+    norm_mode : Literal["pre", "post", "hybrid"], default="pre"
         Block-level normalization strategy:
 
         * ``"pre"`` — the default pre-norm block: ``x + Attn(LN1(x))`` then
           ``h + FF(LN2(h))`` (identity path through the residual).
+        * ``"post"`` — original Transformer post-norm (Vaswani et al.,
+          2017): ``LN1(x + Attn(x))`` then ``LN2(h + FF(h))``. Less stable
+          at depth without warmup; kept for ablations.
         * ``"hybrid"`` — HybridNorm ("HybridNorm: Towards Stable and
           Efficient Transformer Training via Hybrid Normalization",
           Zhuo et al., 2025, arXiv:2503.04598): the attention branch skips
@@ -145,6 +148,12 @@ class TransformerBlock(nn.Module):
         Dropout probability on the residual branches.
     use_sdpa : bool, default=False
         Route attention through ``F.scaled_dot_product_attention``.
+    qkv_bias : bool, default=False
+        Add biases to the self-attention QKV projections (timm/HF ViT
+        checkpoints need ``True``). Passed to the default
+        :class:`MultiHeadAttention`; ignored when ``attn_layer`` is injected.
+    out_bias : bool, default=True
+        Add a bias to the self-attention output projection.
     qk_mod : Callable[[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None, default=None
         Post-head-split query/key modulation (e.g. a
         ``RotaryPositionalEmbedding``), passed to the self-attention block.
@@ -195,14 +204,16 @@ class TransformerBlock(nn.Module):
         attn_p: float = 0.0,
         dropout_p: float = 0.0,
         use_sdpa: bool = False,
+        qkv_bias: bool = False,
+        out_bias: bool = True,
         qk_mod: Callable[[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None = None,
         ff_layer: nn.Module | None = None,
         attn_layer: nn.Module | None = None,
         cross_attn_layer: nn.Module | None = None,
     ):
         super().__init__()
-        if norm_mode not in ("pre", "hybrid"):
-            raise ValueError(f"norm_mode must be 'pre' or 'hybrid', got {norm_mode!r}")
+        if norm_mode not in ("pre", "post", "hybrid"):
+            raise ValueError(f"norm_mode must be 'pre', 'post' or 'hybrid', got {norm_mode!r}")
         self.norm_mode = norm_mode
         self.with_cross_attn = with_cross_attn
         if cross_attn_layer is not None and not with_cross_attn:
@@ -223,10 +234,12 @@ class TransformerBlock(nn.Module):
                 qk_mod=qk_mod,
                 qkv_norm=norm_mode == "hybrid",
                 qkv_norm_layer=norm_layer,
+                qkv_bias=qkv_bias,
+                out_bias=out_bias,
             )
         )
         self.adapt_residual = nn.Linear(in_size, out_size) if in_size != out_size else nn.Identity()
-        self.norm1 = norm_layer(in_size) if norm_mode == "pre" else nn.Identity()
+        self.norm1 = norm_layer(in_size) if norm_mode in ("pre", "post") else nn.Identity()
         self.dropout1 = nn.Dropout(dropout_p)
 
         if with_cross_attn:
@@ -241,6 +254,8 @@ class TransformerBlock(nn.Module):
                 attn_p=attn_p,
                 dropout_p=dropout_p,
                 use_sdpa=use_sdpa,
+                qkv_bias=qkv_bias,
+                out_bias=out_bias,
                 attn_layer=cross_attn_layer,
             )
 
@@ -288,6 +303,19 @@ class TransformerBlock(nn.Module):
             injected ``attn_layer`` does not produce one (e.g.
             :class:`~spartan_torch.LinformerAttention`).
         """
+        if self.norm_mode == "post":
+            # Original Transformer (Vaswani et al., 2017): norm AFTER the
+            # residual add. Cross-attention (if any) stays pre-norm inside
+            # its own block; the post-norm applies to self-attn and FFN.
+            attn_out = self.attn(x, x, x, mask=mask, past_key_value=past_key_value)
+            h, cache = attn_out if isinstance(attn_out, tuple) else (attn_out, None)
+            h = self.norm1(self.adapt_residual(x) + self.dropout1(h))
+            if self.with_cross_attn:
+                if memory is None:
+                    raise ValueError("memory is required when with_cross_attn=True")
+                h = self.cross_attn(h, memory, memory_mask=memory_mask)
+            return self.norm2(h + self.dropout2(self.ff(h))), cache
+
         h = self.norm1(x)
         attn_out = self.attn(h, h, h, mask=mask, past_key_value=past_key_value)
         h, cache = attn_out if isinstance(attn_out, tuple) else (attn_out, None)

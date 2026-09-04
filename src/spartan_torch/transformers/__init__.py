@@ -18,9 +18,10 @@ from .block import (
     TransformerBlock,
 )
 from .norm import QKVNorm, RMSNorm
-from .positional import PositionalEncoding, RotaryPositionalEmbedding
+from .positional import ALiBiBias, PositionalEncoding, RotaryPositionalEmbedding
 
 __all__ = [
+    "ALiBiBias",
     "ChunkedFeedForward",
     "CrossAttentionBlock",
     "FeedForward",

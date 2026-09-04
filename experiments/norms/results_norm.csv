@@ -1,0 +1,5 @@
+n_layers,norm_mode,norm,train_loss,max_grad_norm,eval_64
+8,pre,layernorm,0.3266,1.70,0.3269
+8,pre,rmsnorm,0.3258,1.75,0.3272
+8,post,layernorm,0.3265,3.86,0.3268
+8,post,rmsnorm,0.3265,3.65,0.3268

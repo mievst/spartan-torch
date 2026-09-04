@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly pretrained-parity (needs network for reference weights).
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      run_bench:
+        description: "Run GPU attention benchmark (needs self-hosted GPU runner)"
+        type: boolean
+        default: false
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync --extra dev --extra experiments
+      - run: uv run python -m pytest -m "not pretrained and not bench"
+
+  parity-pretrained:
+    # Downloads timm/torchvision weights; runs weekly, on main, or on demand.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-parity')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync --extra dev --extra experiments
+      - run: uv run python -m pytest tests/test_weight_parity.py tests/test_sdpa_parity.py -m "parity or pretrained"
+
+  bench:
+    # Manual / scheduled GPU suite. Requires a self-hosted GPU runner;
+    # never runs in PR CI (see AGENTS.md benchmark methodology).
+    if: inputs.run_bench == true
+    runs-on: [self-hosted, gpu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev --extra experiments
+      - run: uv run python scripts/bench_attention.py

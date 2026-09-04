@@ -26,6 +26,11 @@ class PatchEmbedding(nn.Module):
     patch_size : int | tuple[int, int]
         Size of each patch. Single int → square patches; tuple →
         ``(patch_h, patch_w)``.
+
+    References
+    ----------
+    "An Image is Worth 16x16 Words: Transformers for Image Recognition at
+    Scale" (Dosovitskiy et al., 2020, arXiv:2010.11929).
     """
 
     def __init__(

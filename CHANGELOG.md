@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Фиксы MAE: знак частот в `_get_pos_embed` (`mae_model.py`), двойной gather
+  `pred` (декодер уже возвращает исходный порядок), `MAEDecoderHead` сравнивает
+  сырой prediction с нормализованным target (как в статье).
+- Пэйринги: `SwiGLUFeedForward` ↔ HF `LlamaMLP` (strict-load, ключи 1-в-1),
+  `RotaryPositionalEmbedding` ↔ HF rotary (включая offset), `InvertedResidual`
+  ↔ torchvision `InvertedResidual(e=6)` block-level (+ slice из
+  `IMAGENET1K_V1`); `compat/hf_llama.py`.
+
 - `MultiHeadAttention` / `TransformerBlock` / `CrossAttentionBlock`:
   `qkv_bias` / `out_bias` (загрузка biased QKV-весов timm/HF), `norm_mode="post"`
   в `TransformerBlock` (для ablation; дефолт `pre`).

@@ -11,7 +11,15 @@ ResNet). Library code in ``src/spartan_torch`` stays free of full-model
 assemblies by design (see AGENTS.md).
 """
 
+from .hf_llama import remap_hf_llama_mlp, remap_torchvision_mobilenet_block
 from .timm_vit import RemapReport, apply_remap, remap_timm_vit
 from .torchvision_resnet import remap_torchvision_resnet18
 
-__all__ = ["RemapReport", "apply_remap", "remap_timm_vit", "remap_torchvision_resnet18"]
+__all__ = [
+    "RemapReport",
+    "apply_remap",
+    "remap_hf_llama_mlp",
+    "remap_timm_vit",
+    "remap_torchvision_mobilenet_block",
+    "remap_torchvision_resnet18",
+]

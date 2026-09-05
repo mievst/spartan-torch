@@ -8,6 +8,13 @@ Registry of reproduced architectures:
 
 - ViT-Base/16 (``vit_base_patch16_224``) ← timm — compat ``CompatViT``
 - ResNet-18 (BasicBlock × [2,2,2,2]) ← torchvision — compat ``CompatResNet18``
+- LLaMA MLP (``gate/up/down_proj``) ← transformers — ``SwiGLUFeedForward``
+  (block-level, identical keys)
+- LLaMA rotary (``LlamaRotaryEmbedding`` + ``apply_rotary_pos_emb``) ←
+  transformers — ``RotaryPositionalEmbedding`` (math-level, no weights)
+- MobileNetV2 ``InvertedResidual`` (``expand_ratio=6``) ← torchvision —
+  block-level (``expansion=1`` and stride-2 shortcuts differ by design, see
+  ``compat/hf_llama.py``)
 
 Gates (strict, CPU fp32, eval, fixed seed):
 
@@ -29,12 +36,20 @@ import torch.nn.functional as F
 
 from spartan_torch import (
     ClassToken,
+    InvertedResidual,
     LearnablePositionEmbedding,
     PatchEmbedding,
     ResidualBlock,
+    RotaryPositionalEmbedding,
+    SwiGLUFeedForward,
     TransformerBlock,
 )
-from spartan_torch.compat import remap_timm_vit, remap_torchvision_resnet18
+from spartan_torch.compat import (
+    remap_hf_llama_mlp,
+    remap_timm_vit,
+    remap_torchvision_mobilenet_block,
+    remap_torchvision_resnet18,
+)
 
 pytestmark = pytest.mark.parity
 
@@ -210,3 +225,96 @@ class TestResNet18PretrainedParity:
             acc = (ours(x).argmax(-1) == ref(x).argmax(-1)).float().mean().item()
         assert acc == 1.0
         print(f"\nResNet18 pretrained parity: max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+class TestSwiGLUHfParity:
+    @pytest.mark.parametrize("hidden,inter", [(256, 512), (128, 384)])
+    def test_llama_mlp_weights_and_forward(self, hidden, inter):
+        hf = pytest.importorskip("transformers")
+        cfg = hf.LlamaConfig(hidden_size=hidden, intermediate_size=inter)
+        ref = hf.models.llama.modeling_llama.LlamaMLP(cfg)
+        remapped, report = remap_hf_llama_mlp(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = SwiGLUFeedForward(hidden, inter, bias=False)
+        assert set(ours.state_dict()) == set(remapped)
+        ours.load_state_dict(remapped, strict=True)
+
+        ours.eval()
+        ref.eval()
+        torch.manual_seed(0)
+        x = torch.randn(2, 8, hidden)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x), ref(x))
+        print(f"\nSwiGLU↔LlamaMLP parity ({hidden}/{inter}): max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+class TestRoPEHfParity:
+    @pytest.mark.parametrize("offset", [0, 17])
+    def test_llama_rotary_matches(self, offset):
+        hf = pytest.importorskip("transformers")
+        B, H, S, D = 2, 4, 12, 64
+        cfg = hf.LlamaConfig(hidden_size=H * D, num_attention_heads=H,
+                             intermediate_size=128, max_position_embeddings=256)
+        ref_rot = hf.models.llama.modeling_llama.LlamaRotaryEmbedding(cfg)
+        ours = RotaryPositionalEmbedding(D, max_seq_len=256)
+
+        torch.manual_seed(0)
+        q = torch.randn(B, H, S, D)
+        k = torch.randn(B, H, S, D)
+        pos = torch.arange(offset, offset + S).unsqueeze(0).expand(B, -1)
+        with torch.no_grad():
+            cos, sin = ref_rot(q.transpose(1, 2), pos)
+            ref_q, ref_k = hf.models.llama.modeling_llama.apply_rotary_pos_emb(q, k, cos, sin)
+            got_q, got_k = ours(q, k, pos[0], pos[0])
+            dq, cq = assert_parity(got_q, ref_q)
+            dk, ck = assert_parity(got_k, ref_k)
+        print(f"\nRoPE↔HF parity (offset={offset}): max_diff={max(dq, dk):.2e}")
+
+
+class TestMobileNetBlockParity:
+    @pytest.mark.parametrize("in_c,out_c,stride", [(24, 32, 2), (32, 64, 2), (64, 96, 1), (160, 320, 1)])
+    def test_inverted_residual_block(self, in_c, out_c, stride):
+        tv = pytest.importorskip("torchvision")
+        from torchvision.models.mobilenetv2 import InvertedResidual as TvBlock
+
+        ref = TvBlock(in_c, out_c, stride, expand_ratio=6)
+        remapped, report = remap_torchvision_mobilenet_block(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        # torchvision drops the residual on stride-2 (no projection shortcut).
+        ours = InvertedResidual(in_c, out_c, stride=stride, expansion=6,
+                                use_skip=(stride == 1 and in_c == out_c))
+        assert set(ours.state_dict()) == set(remapped), (
+            f"missing={sorted(set(ours.state_dict()) - set(remapped))}")
+        ours.load_state_dict(remapped, strict=True)
+
+        ours.eval()
+        ref.eval()
+        torch.manual_seed(0)
+        x = torch.randn(1, in_c, 28, 28)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x), ref(x))
+        print(f"\nMobileNet block parity ({in_c}->{out_c} s{stride}): max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+@pytest.mark.pretrained
+class TestMobileNetBlockPretrainedParity:
+    def test_pretrained_block_slice(self):
+        tv = pytest.importorskip("torchvision")
+        try:
+            ref = tv.models.mobilenet_v2(weights=tv.models.MobileNet_V2_Weights.IMAGENET1K_V1)
+        except Exception as e:
+            pytest.skip(f"torchvision weights download failed: {e}")
+        # features[3]: InvertedResidual(24, 24, s=1, e=6).
+        tv_block = ref.features[3]
+        remapped, _ = remap_torchvision_mobilenet_block(tv_block.state_dict())
+        ours = InvertedResidual(24, 24, stride=1, expansion=6)
+        ours.load_state_dict(remapped, strict=True)
+        ours.eval()
+        tv_block.eval()
+        torch.manual_seed(0)
+        x = torch.randn(1, 24, 28, 28)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x), tv_block(x))
+        print(f"\nMobileNet pretrained block parity: max_diff={max_diff:.2e} cos={cos:.8f}")

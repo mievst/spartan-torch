@@ -18,6 +18,16 @@ Parity и бенчмарки `spartan-torch`. Parity-таблица генери
   `TransformerBlock(qkv_bias=True)`, `LayerNorm(eps=1e-6)` как в timm)
 - ResNet-18 ← `torchvision ResNet18_Weights.IMAGENET1K_V1` — `CompatResNet18`
   (stem + `ResidualBlock`-стадии `[2,2,2,2]`)
+- LLaMA MLP ← `transformers LlamaMLP` — `SwiGLUFeedForward` (block-level,
+  ключи 1-в-1, strict-load)
+- LLaMA rotary ← `transformers LlamaRotaryEmbedding + apply_rotary_pos_emb` —
+  `RotaryPositionalEmbedding` (math-level, весoв нет; включая offset-позиции
+  для KV-cache decoding)
+- MobileNetV2 `InvertedResidual(expand_ratio=6)` ← `torchvision` —
+  block-level, включая slice `features[3]` из `IMAGENET1K_V1`. Границы:
+  `expansion=1` у нас Identity (в tv реальный conv — задокументировано),
+  stride-2 собирается с `use_skip=False` (в tv shortcut дропается, не
+  проецируется)
 
 <!-- parity:begin -->
 | arch | source | max abs diff | cosine | pred agreement | published top-1 |

@@ -26,9 +26,6 @@ Homepage = "https://github.com/mievst/spartan-torch"
 Repository = "https://github.com/mievst/spartan-torch"
 Issues = "https://github.com/mievst/spartan-torch/issues"
 
-[project.scripts]
-spartan-torch = "spartan_torch:main"
-
 [project.optional-dependencies]
 dev = [
     "albumentationsx>=2.3.7",

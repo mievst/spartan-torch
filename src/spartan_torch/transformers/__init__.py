@@ -19,6 +19,7 @@ from .block import (
 )
 from .norm import QKVNorm, RMSNorm
 from .positional import ALiBiBias, PositionalEncoding, RotaryPositionalEmbedding
+from .ssm import Mamba2Block, Mamba2Mixer, Mamba3Block, Mamba3Mixer, MambaBlock, MambaMixer
 
 __all__ = [
     "ALiBiBias",
@@ -28,6 +29,12 @@ __all__ = [
     "LinearTransformerAttention",
     "LinformerAttention",
     "LinformerSeqProjection",
+    "Mamba2Block",
+    "Mamba2Mixer",
+    "Mamba3Block",
+    "Mamba3Mixer",
+    "MambaBlock",
+    "MambaMixer",
     "MultiHeadAttention",
     "PerformerAdapter",
     "PerformerAttention",

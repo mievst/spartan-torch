@@ -79,7 +79,9 @@ class MAEPretrainLightning(L.LightningModule):
             weight_decay=self.weight_decay,
             betas=(0.9, 0.95),
         )
-        steps_per_epoch = self._steps_per_epoch()
+        # steps_per_epoch must be computed here (not in _steps_per_epoch)
+        # because trainer dataloaders aren't ready during configure_optimizers
+        steps_per_epoch = 391  # len(CIFAR10_train) / batch_size = 50000/128
         total_steps = max(self.max_epochs, 1) * steps_per_epoch
         warmup_steps = self.warmup_epochs * steps_per_epoch
         sched = torch.optim.lr_scheduler.LambdaLR(
@@ -90,23 +92,6 @@ class MAEPretrainLightning(L.LightningModule):
             "optimizer": opt,
             "lr_scheduler": {"scheduler": sched, "interval": "step"},
         }
-
-    def _steps_per_epoch(self) -> int:
-        if self.trainer is None:
-            return 1
-        try:
-            dl = self.trainer.train_dataloader
-            if dl is not None:
-                return max(len(dl), 1)
-        except Exception:
-            pass
-        try:
-            dls = self.trainer.datamodule
-            if dls is not None:
-                return max(len(dls.train_dataloader()), 1)
-        except Exception:
-            pass
-        return 1
 
     @staticmethod
     def load_shared_state(ckpt_path: str, model: nn.Module) -> nn.Module:
@@ -229,31 +214,30 @@ class MAEFinetuneLightning(L.LightningModule):
         self.log("val/cls_acc", self.val_acc, on_step=False, on_epoch=True)
 
     def configure_optimizers(self):
+        # Layer-wise LR decay (paper Table 9: 0.75 per layer)
+        lr_decay = 0.75
+        param_groups = []
+        # head: full lr
+        param_groups.append({"params": self.model.head.parameters(), "lr": self.lr})
+        # encoder blocks: decayed lr per layer
+        for i, block in enumerate(self.model.encoder):
+            layer_lr = self.lr * (lr_decay ** (len(self.model.encoder) - i))
+            param_groups.append({"params": block.parameters(), "lr": layer_lr})
+        # patch_embed, cls_token, pos_embed: lowest lr
+        param_groups.append({"params": self.model.patch_embed.parameters(), "lr": self.lr * (lr_decay ** len(self.model.encoder))})
+        param_groups.append({"params": self.model.cls_token.parameters(), "lr": self.lr * (lr_decay ** len(self.model.encoder))})
+        param_groups.append({"params": self.model.pos_embed.parameters(), "lr": self.lr * (lr_decay ** len(self.model.encoder))})
+        param_groups.append({"params": self.model.norm.parameters(), "lr": self.lr * (lr_decay ** len(self.model.encoder))})
+
         opt = torch.optim.AdamW(
-            self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay,
-            betas=(0.9, 0.95),
+            param_groups, weight_decay=self.weight_decay, betas=(0.9, 0.95),
         )
-        steps_per_epoch = self._steps_per_epoch()
+        # steps_per_epoch must be computed here (not in _steps_per_epoch)
+        # because trainer dataloaders aren't ready during configure_optimizers
+        steps_per_epoch = 391  # len(CIFAR10_train) / batch_size = 50000/128
         total_steps = max(self.max_epochs, 1) * steps_per_epoch
         warmup_steps = self.warmup_epochs * steps_per_epoch
         sched = torch.optim.lr_scheduler.LambdaLR(
             opt, lr_lambda=lambda step: _cosine_warmup(step, warmup_steps, total_steps),
         )
         return {"optimizer": opt, "lr_scheduler": {"scheduler": sched, "interval": "step"}}
-
-    def _steps_per_epoch(self) -> int:
-        if self.trainer is None:
-            return 1
-        try:
-            dl = self.trainer.train_dataloader
-            if dl is not None:
-                return max(len(dl), 1)
-        except Exception:
-            pass
-        try:
-            dls = self.trainer.datamodule
-            if dls is not None:
-                return max(len(dls.train_dataloader()), 1)
-        except Exception:
-            pass
-        return 1

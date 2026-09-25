@@ -15,6 +15,13 @@ Registry of reproduced architectures:
 - MobileNetV2 ``InvertedResidual`` (``expand_ratio=6``) ← torchvision —
   block-level (``expansion=1`` and stride-2 shortcuts differ by design, see
   ``compat/hf_llama.py``)
+- DINO ``DINOHead`` ← facebookresearch/dino (``vision_transformer.py``) —
+  ``DINOProjectionHead`` (block-level, random-weight parity; the reference
+  implementation is vendored below — upstream has no installable package,
+  so there is no ``pretrained`` leg, only the offline ``parity`` one)
+- DINO ViT-Small/16 backbone ← facebookresearch/dino torch.hub
+  (``dino_deitsmall16_pretrain.pth``) — compat ``CompatViTSmall``
+  (``pretrained`` leg, backbone features only: hub weights ship no head)
 
 Gates (strict, CPU fp32, eval, fixed seed):
 
@@ -36,8 +43,12 @@ import torch.nn.functional as F
 
 from spartan_torch import (
     ClassToken,
+    DINOProjectionHead,
     InvertedResidual,
     LearnablePositionEmbedding,
+    Mamba2Mixer,
+    Mamba3Mixer,
+    MambaMixer,
     PatchEmbedding,
     ResidualBlock,
     RotaryPositionalEmbedding,
@@ -45,7 +56,17 @@ from spartan_torch import (
     TransformerBlock,
 )
 from spartan_torch.compat import (
+    hf_mamba_kwargs,
+    hf_mamba2_kwargs,
+    official_mamba3_kwargs,
+    remap_dino_head,
     remap_hf_llama_mlp,
+    remap_hf_mamba_mixer,
+    remap_hf_mamba2_mixer,
+    remap_hf_mamba3_mixer,
+    remap_mamba_ssm_mamba,
+    remap_mamba_ssm_mamba2,
+    remap_mamba_ssm_mamba3,
     remap_timm_vit,
     remap_torchvision_mobilenet_block,
     remap_torchvision_resnet18,
@@ -97,6 +118,37 @@ class CompatViT(nn.Module):
         for block in self.encoder:
             x, _ = block(x)
         return self.head(self.norm(x)[:, 0])
+
+
+class CompatViTSmall(nn.Module):
+    """ViT-Small/16 backbone assembly from primitives (test-only).
+
+    Mirrors ``facebookresearch/dino`` ``vit_small`` (``num_classes=0``):
+    embed 384, depth 12, heads 6, patch 16, ``qkv_bias=True``,
+    ``LayerNorm(eps=1e-6)``. Forward returns post-norm ``[CLS]`` features,
+    like the hub model. Key layout is the timm one, so ``remap_timm_vit``
+    applies unchanged (it is dimension-agnostic).
+    """
+
+    def __init__(self):
+        super().__init__()
+        from functools import partial
+
+        dino_norm = partial(nn.LayerNorm, eps=1e-6)
+        self.patch_embed = PatchEmbedding(3, 384, 16)
+        self.cls_token = ClassToken(384)
+        self.pos_embed = LearnablePositionEmbedding(197, 384)
+        self.encoder = nn.ModuleList([
+            TransformerBlock(384, 64, 6, 384, 1536, qkv_bias=True, out_bias=True, norm_layer=dino_norm)
+            for _ in range(12)
+        ])
+        self.norm = nn.LayerNorm(384, eps=1e-6)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.pos_embed(self.cls_token(self.patch_embed(x)))
+        for block in self.encoder:
+            x, _ = block(x)
+        return self.norm(x)[:, 0]
 
 
 class CompatResNet18(nn.Module):
@@ -318,3 +370,379 @@ class TestMobileNetBlockPretrainedParity:
         with torch.no_grad():
             max_diff, cos = assert_parity(ours(x), tv_block(x))
         print(f"\nMobileNet pretrained block parity: max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+class RefDINOHead(nn.Module):
+    """Vendored reference: ``DINOHead`` from facebookresearch/dino.
+
+    Verbatim copy of ``vision_transformer.py::DINOHead`` (Apache-2.0,
+    Caron et al., 2021, arXiv:2104.14294), kept here because upstream ships
+    no installable package (``pytest.importorskip`` is impossible). Only used
+    as the parity target for :class:`DINOProjectionHead`.
+    """
+
+    def __init__(self, in_dim, out_dim, use_bn=False, norm_last_layer=True,
+                 nlayers=3, hidden_dim=2048, bottleneck_dim=256):
+        super().__init__()
+        nlayers = max(nlayers, 1)
+        if nlayers == 1:
+            self.mlp = nn.Linear(in_dim, bottleneck_dim)
+        else:
+            layers = [nn.Linear(in_dim, hidden_dim)]
+            if use_bn:
+                layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.GELU())
+            for _ in range(nlayers - 2):
+                layers.append(nn.Linear(hidden_dim, hidden_dim))
+                if use_bn:
+                    layers.append(nn.BatchNorm1d(hidden_dim))
+                layers.append(nn.GELU())
+            layers.append(nn.Linear(hidden_dim, bottleneck_dim))
+            self.mlp = nn.Sequential(*layers)
+        self.apply(self._init_weights)
+        self.last_layer = nn.utils.weight_norm(nn.Linear(bottleneck_dim, out_dim, bias=False))
+        self.last_layer.weight_g.data.fill_(1)
+        if norm_last_layer:
+            self.last_layer.weight_g.requires_grad = False
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        x = self.mlp(x)
+        x = nn.functional.normalize(x, dim=-1, p=2)
+        x = self.last_layer(x)
+        return x
+
+
+class TestDINOHeadParity:
+    # RefDINOHead intentionally uses the deprecated nn.utils.weight_norm API:
+    # only it produces the upstream weight_g/weight_v key layout we remap from.
+    @pytest.mark.filterwarnings("ignore::FutureWarning")
+    @pytest.mark.parametrize("norm_last_layer", [True, False])
+    def test_dino_head_weights_and_forward(self, norm_last_layer):
+        ref = RefDINOHead(64, 256, norm_last_layer=norm_last_layer,
+                          nlayers=3, hidden_dim=128, bottleneck_dim=32)
+        remapped, report = remap_dino_head(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = DINOProjectionHead(64, 128, 256, bottleneck_dim=32,
+                                  norm_last_layer=norm_last_layer)
+        assert set(ours.state_dict()) == set(remapped), (
+            f"missing={sorted(set(ours.state_dict()) - set(remapped))}")
+        ours.load_state_dict(remapped, strict=True)
+
+        ours.eval()
+        ref.eval()
+        torch.manual_seed(0)
+        x = torch.randn(4, 64)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x), ref(x))
+        print(f"\nDINO head parity (norm_last_layer={norm_last_layer}): "
+              f"max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+DINO_VITS16_URL = (
+    "https://dl.fbaipublicfiles.com/dino/dino_deitsmall16_pretrain/dino_deitsmall16_pretrain.pth"
+)
+
+
+@pytest.mark.pretrained
+class TestDINOSmallPretrainedParity:
+    def test_dino_vits16_backbone(self):
+        pytest.importorskip("torchvision")  # required by the dino hubconf
+        try:
+            ref = torch.hub.load("facebookresearch/dino:main", "dino_vits16", pretrained=False)
+        except Exception as e:
+            pytest.skip(f"dino repo checkout failed: {e}")
+        try:
+            sd = torch.hub.load_state_dict_from_url(DINO_VITS16_URL, map_location="cpu")
+        except Exception as e:
+            pytest.skip(f"dino weights download failed: {e}")
+        try:
+            ref.load_state_dict(sd, strict=True)
+        except Exception as e:
+            pytest.skip(f"dino weights layout changed: {e}")
+
+        remapped, report = remap_timm_vit({k: v.cpu() for k, v in sd.items()})
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = CompatViTSmall()
+        assert set(ours.state_dict()) == set(remapped), (
+            f"missing={sorted(set(ours.state_dict()) - set(remapped))}")
+        ours.load_state_dict(remapped, strict=True)
+
+        ours.eval()
+        ref.eval()
+        torch.manual_seed(0)
+        x = torch.randn(2, 3, 224, 224)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x), ref(x))
+        print(f"\nDINO vits16 backbone parity: max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+def _mamba_hf_mixer_config(hf, **overrides):
+    """Small HF MambaConfig with the CUDA-only flags pinned off."""
+    kw = {
+        "hidden_size": 32,
+        "state_size": 8,
+        "num_hidden_layers": 1,
+        "expand": 2,
+        "conv_kernel": 4,
+        "use_bias": False,
+        "use_conv_bias": True,
+        "use_mambapy": False,
+    }
+    kw.update(overrides)
+    return hf.MambaConfig(**kw)
+
+
+class TestMambaHfParity:
+    @pytest.mark.parametrize("use_bias,use_conv_bias", [(False, True), (True, True)])
+    def test_hf_mixer_weights_and_forward(self, use_bias, use_conv_bias):
+        hf = pytest.importorskip("transformers")
+        cfg = _mamba_hf_mixer_config(hf, use_bias=use_bias, use_conv_bias=use_conv_bias)
+        ref = hf.models.mamba.modeling_mamba.MambaMixer(cfg, layer_idx=0)
+        remapped, report = remap_hf_mamba_mixer(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = MambaMixer(**hf_mamba_kwargs(cfg), use_fast_path=False, use_associative_scan=False)
+        assert set(ours.state_dict()) == set(remapped), (
+            f"missing={sorted(set(ours.state_dict()) - set(remapped))}")
+        ours.load_state_dict(remapped, strict=True)
+
+        ours.eval()
+        ref.eval()
+        torch.manual_seed(0)
+        x = torch.randn(2, 12, cfg.hidden_size)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x)[0], ref(x))
+        print(f"\nMambaMixer↔HF parity (bias={use_bias}): max_diff={max_diff:.2e} cos={cos:.8f}")
+
+    def test_hf_mixer_step_matches_prefill(self):
+        hf = pytest.importorskip("transformers")
+        cfg = _mamba_hf_mixer_config(hf)
+        ref = hf.models.mamba.modeling_mamba.MambaMixer(cfg, layer_idx=0)
+        remapped, _ = remap_hf_mamba_mixer(ref.state_dict())
+        ours = MambaMixer(**hf_mamba_kwargs(cfg), use_fast_path=False, use_associative_scan=False)
+        ours.load_state_dict(remapped, strict=True)
+        ours.eval()
+        torch.manual_seed(0)
+        x = torch.randn(1, 7, cfg.hidden_size)
+        with torch.no_grad():
+            full = ours(x)[0]
+            cache = ours.init_cache(1)
+            outs = []
+            for t in range(x.size(1)):
+                o, cache = ours(x[:, t : t + 1], cache)
+                outs.append(o)
+            max_diff, cos = assert_parity(torch.cat(outs, dim=1), full)
+        print(f"\nMambaMixer step↔prefill (HF weights): max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+class TestMambaSsmRepoParity:
+    def test_official_weights_and_forward(self):
+        ssm = pytest.importorskip("mamba_ssm")
+        ref = ssm.Mamba(d_model=32, d_state=8, d_conv=4, expand=2)
+        remapped, report = remap_mamba_ssm_mamba(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = MambaMixer(32, d_state=8, d_conv=4, expand=2, use_fast_path=False,
+                          use_associative_scan=False)
+        assert set(ours.state_dict()) == set(remapped), (
+            f"missing={sorted(set(ours.state_dict()) - set(remapped))}")
+        ours.load_state_dict(remapped, strict=True)
+
+        ours.eval()
+        ref.eval()
+        torch.manual_seed(0)
+        x = torch.randn(2, 12, 32)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x)[0], ref(x))
+        print(f"\nMambaMixer↔mamba-ssm parity: max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+@pytest.mark.pretrained
+class TestMamba130mPretrainedParity:
+    def test_first_mixer_block(self):
+        hf = pytest.importorskip("transformers")
+        try:
+            model = hf.MambaForCausalLM.from_pretrained("state-spaces/mamba-130m-hf")
+        except Exception as e:
+            pytest.skip(f"mamba-130m-hf download failed: {e}")
+        cfg = model.config
+        ref = model.backbone.layers[0].mixer.eval()
+        remapped, report = remap_hf_mamba_mixer(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = MambaMixer(**hf_mamba_kwargs(cfg), use_fast_path=False,
+                          use_associative_scan=False).eval()
+        ours.load_state_dict(remapped, strict=True)
+
+        torch.manual_seed(0)
+        norm = model.backbone.layers[0].norm
+        x = norm(torch.randn(2, 16, cfg.hidden_size))
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x)[0], ref(x))
+        print(f"\nmamba-130m-hf mixer[0] parity: max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+def _mamba2_hf_mixer_config(hf, **overrides):
+    """Small HF Mamba2Config (E == H*P enforced). CUDA flags pinned off."""
+    kw = {
+        "hidden_size": 32,
+        "state_size": 8,
+        "num_heads": 4,
+        "head_dim": 16,
+        "n_groups": 2,
+        "expand": 2,
+        "conv_kernel": 4,
+        "chunk_size": 8,
+        "use_bias": False,
+        "use_conv_bias": True,
+    }
+    kw.update(overrides)
+    return hf.Mamba2Config(**kw)
+
+
+class TestMamba2HfParity:
+    @pytest.mark.parametrize("use_bias,use_conv_bias", [(False, True), (True, True)])
+    def test_hf_mixer_weights_and_forward(self, use_bias, use_conv_bias):
+        hf = pytest.importorskip("transformers")
+        cfg = _mamba2_hf_mixer_config(hf, use_bias=use_bias, use_conv_bias=use_conv_bias)
+        ref = hf.models.mamba2.modeling_mamba2.Mamba2Mixer(cfg, layer_idx=0)
+        remapped, report = remap_hf_mamba2_mixer(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = Mamba2Mixer(**hf_mamba2_kwargs(cfg), use_fast_path=False)
+        assert set(ours.state_dict()) == set(remapped), (
+            f"missing={sorted(set(ours.state_dict()) - set(remapped))}")
+        ours.load_state_dict(remapped, strict=True)
+
+        ours.eval()
+        ref.eval()
+        torch.manual_seed(0)
+        x = torch.randn(2, 10, cfg.hidden_size)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x)[0], ref(x))
+        print(f"\nMamba2Mixer↔HF parity (bias={use_bias}): max_diff={max_diff:.2e} cos={cos:.8f}")
+
+    def test_hf_mixer_step_matches_prefill(self):
+        hf = pytest.importorskip("transformers")
+        cfg = _mamba2_hf_mixer_config(hf)
+        ref = hf.models.mamba2.modeling_mamba2.Mamba2Mixer(cfg, layer_idx=0)
+        remapped, _ = remap_hf_mamba2_mixer(ref.state_dict())
+        ours = Mamba2Mixer(**hf_mamba2_kwargs(cfg), use_fast_path=False)
+        ours.load_state_dict(remapped, strict=True)
+        ours.eval()
+        torch.manual_seed(0)
+        x = torch.randn(1, 7, cfg.hidden_size)
+        with torch.no_grad():
+            full = ours(x)[0]
+            cache = ours.init_cache(1)
+            outs = []
+            for t in range(x.size(1)):
+                o, cache = ours(x[:, t : t + 1], cache)
+                outs.append(o)
+            max_diff, cos = assert_parity(torch.cat(outs, dim=1), full)
+        print(f"\nMamba2Mixer step↔prefill (HF weights): max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+class TestMamba2SsmRepoParity:
+    def test_official_weights_and_forward(self):
+        ssm = pytest.importorskip("mamba_ssm")
+        ref = ssm.Mamba2(d_model=32, d_state=8, d_conv=4, expand=2,
+                         headdim=16, ngroups=2)
+        remapped, report = remap_mamba_ssm_mamba2(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = Mamba2Mixer(32, d_state=8, d_conv=4, expand=2, num_heads=4,
+                           head_dim=16, n_groups=2, chunk_size=8, use_fast_path=False)
+        assert set(ours.state_dict()) == set(remapped), (
+            f"missing={sorted(set(ours.state_dict()) - set(remapped))}")
+        ours.load_state_dict(remapped, strict=True)
+
+        ours.eval()
+        ref.eval()
+        torch.manual_seed(0)
+        x = torch.randn(2, 10, 32)
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x)[0], ref(x))
+        print(f"\nMamba2Mixer↔mamba-ssm parity: max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+@pytest.mark.pretrained
+class TestMamba2130mPretrainedParity:
+    def test_first_mixer_block(self):
+        hf = pytest.importorskip("transformers")
+        try:
+            model = hf.Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf")
+        except Exception as e:
+            pytest.skip(f"mamba2-130m-hf download failed: {e}")
+        cfg = model.config
+        ref = model.backbone.layers[0].mixer.eval()
+        remapped, report = remap_hf_mamba2_mixer(ref.state_dict())
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+
+        ours = Mamba2Mixer(**hf_mamba2_kwargs(cfg), use_fast_path=False).eval()
+        ours.load_state_dict(remapped, strict=True)
+
+        torch.manual_seed(0)
+        norm = model.backbone.layers[0].norm
+        x = norm(torch.randn(2, 8, cfg.hidden_size))
+        with torch.no_grad():
+            max_diff, cos = assert_parity(ours(x)[0], ref(x))
+        print(f"\nmamba2-130m-hf mixer[0] parity: max_diff={max_diff:.2e} cos={cos:.8f}")
+
+
+@pytest.mark.pretrained
+class TestMamba3370mPretrainedWeights:
+    # No runnable reference exists in this environment (official kernels are
+    # Linux/CUDA-only, transformers ships no Mamba-3): coverage is
+    # strict-loading the real ib-ssm checkpoint plus self-agreement
+    # (step-vs-prefill) on those weights.
+    def test_real_weights_strict_load_and_self_agreement(self):
+        pytest.importorskip("safetensors")
+        from huggingface_hub import hf_hub_download
+
+        try:
+            cfg_path = hf_hub_download("ib-ssm/mamba3-370M-10BT", "config.json")
+            st_path = hf_hub_download("ib-ssm/mamba3-370M-10BT", "model.safetensors")
+        except Exception as e:
+            pytest.skip(f"mamba3-370M download failed: {e}")
+        import json
+
+        from safetensors import safe_open
+
+        cfg = json.load(open(cfg_path))
+        assert cfg["is_mimo"] is False
+        ours = Mamba3Mixer(**official_mamba3_kwargs(cfg)).eval()
+
+        prefix = "backbone.layers.0.mixer."
+        with safe_open(st_path, framework="pt") as f:
+            sd = {k[len(prefix) :]: f.get_tensor(k) for k in f.keys() if k.startswith(prefix)}
+        remapped, report = remap_mamba_ssm_mamba3(sd)
+        assert report.unmatched_source == [], f"unmatched: {report.unmatched_source}"
+        assert set(ours.state_dict()) == set(remapped), (
+            f"missing={sorted(set(ours.state_dict()) - set(remapped))}")
+        ours.load_state_dict(remapped, strict=True)
+
+        torch.manual_seed(0)
+        x = torch.randn(1, 6, ours.d_model)
+        with torch.no_grad():
+            full = ours(x)[0]
+            assert torch.isfinite(full).all()
+            cache = ours.init_cache(1)
+            outs = []
+            for t in range(x.size(1)):
+                o, cache = ours(x[:, t : t + 1], cache)
+                outs.append(o)
+            max_diff, cos = parity_metrics(torch.cat(outs, dim=1), full)
+            # Self-agreement (no runnable reference): looser gate than the
+            # 1e-5 ref-parity one — RoPE cumsum ordering across steps.
+            assert max_diff < 1e-4, f"max abs diff {max_diff:.3e} >= 1e-4"
+            assert cos > MIN_COSINE, f"cosine {cos:.8f} <= {MIN_COSINE}"
+        print(f"\nmamba3-370M mixer[0] self-agreement: max_diff={max_diff:.2e} cos={cos:.8f}")

@@ -24,9 +24,11 @@ parity:
 verify:
     {{venv_python}} scripts/verify_pretrained.py --write-results
 
-# GPU attention sweep: latency + peak memory + Pareto plot (needs CUDA).
+# GPU mixer sweep: latency + peak memory + Pareto plots (needs CUDA).
+# Runs prefill, then decode (tables merge in the CSV before writing).
 bench:
-    {{venv_python}} scripts/bench_attention.py --write-results
+    {{venv_python}} scripts/bench_attention.py --mode prefill
+    {{venv_python}} scripts/bench_attention.py --mode decode --write-results
 
 # Install / reconcile the virtual environment from the lockfile.
 sync:

@@ -51,16 +51,19 @@ class ViTBackbone(VisionTransformer):
         Parameters
         ----------
         x : torch.Tensor
-            ``(B, C, H, W)``.
+            ``(B, C, H, W)``. ``H``/``W`` may differ from the backbone
+            ``img_size`` (local crops): positional embeddings are
+            bicubic-interpolated to the input patch grid.
 
         Returns
         -------
         torch.Tensor
             ``(B, embed_dim)``.
         """
+        _, _, h, w = x.shape
         x = self.patch_embed(x)
         x = self.cls_token(x)
-        x = self.pos_embed(x)
+        x = self.pos_embed.forward_grid(x, h // self.patch_size, w // self.patch_size)
         for block in self.encoder:
             x, _ = block(x)
         x = self.norm(x)
@@ -77,7 +80,7 @@ class DINONet(nn.Module):
         ``in_channels``, ``embed_dim``, ``depth``, ``num_heads``).
     head : dict
         Keyword args for :class:`DINOProjectionHead` (``hidden_dim``,
-        ``out_dim``, ``norm_last_layer``).
+        ``out_dim``, ``bottleneck_dim``, ``norm_last_layer``).
     """
 
     def __init__(self, backbone: dict, head: dict):
@@ -112,13 +115,19 @@ class DINOLightning(L.LightningModule):
         Args for the shared ViT backbone.
     head_hidden_dim : int, default=2048
     head_out_dim : int, default=65536
-        Projection head geometry (bottleneck hidden, output prototypes).
+        Projection head geometry (MLP hidden, output prototypes).
+    head_bottleneck_dim : int, default=256
+        L2-normalized bottleneck feeding the last layer (original default).
     teacher_temp : float, default=0.04
     student_temp : float, default=0.1
     center_momentum : float, default=0.9
     momentum : float, default=0.996
         Base EMA decay for the teacher; annealed toward 1.0 with a cosine
         schedule over training (0.996 -> 1.0), per the paper.
+    freeze_last_layer : int, default=1
+        Number of first epochs during which the last-layer gradients are
+        cancelled (``utils.cancel_gradients_last_layer`` in the original).
+        The paper recommends increasing this if the loss does not decrease.
     lr : float, default=5e-4
     weight_decay : float, default=0.04
     warmup_epochs : int, default=10
@@ -130,10 +139,12 @@ class DINOLightning(L.LightningModule):
         backbone: dict,
         head_hidden_dim: int = 2048,
         head_out_dim: int = 65536,
+        head_bottleneck_dim: int = 256,
         teacher_temp: float = 0.04,
         student_temp: float = 0.1,
         center_momentum: float = 0.9,
         momentum: float = 0.996,
+        freeze_last_layer: int = 1,
         lr: float = 5e-4,
         weight_decay: float = 0.04,
         warmup_epochs: int = 10,
@@ -145,7 +156,12 @@ class DINOLightning(L.LightningModule):
 
         self.student = DINONet(
             backbone=backbone,
-            head={"hidden_dim": head_hidden_dim, "out_dim": head_out_dim, "norm_last_layer": True},
+            head={
+                "hidden_dim": head_hidden_dim,
+                "out_dim": head_out_dim,
+                "bottleneck_dim": head_bottleneck_dim,
+                "norm_last_layer": True,
+            },
         )
         self.teacher_encoder = MomentumEncoder(self.student, momentum=momentum)
         self.loss = DINOLoss(
@@ -156,6 +172,7 @@ class DINOLightning(L.LightningModule):
         )
         self.lr = lr
         self.weight_decay = weight_decay
+        self.freeze_last_layer = freeze_last_layer
         self.warmup_epochs = warmup_epochs
         self.max_epochs = max_epochs
         self.train_loss = MeanMetric()
@@ -175,13 +192,26 @@ class DINOLightning(L.LightningModule):
         student_out = [self.student(v) for v in student_views]
         with torch.no_grad():
             teacher_out = [self.teacher_encoder(v) for v in teacher_views]
-        self.loss.update_center(torch.cat(teacher_out, dim=0))
         loss = self.loss(student_out, teacher_out)
+        self.loss.update_center(torch.cat(teacher_out, dim=0))
         self.teacher_encoder.update(momentum=self._teacher_momentum())
         self.train_loss(loss)
         self.log("train/loss", self.train_loss, on_step=True, on_epoch=True)
         self.log("train/momentum", self._teacher_momentum())
         return loss
+
+    def on_before_optimizer_step(self, optimizer) -> None:
+        """Cancel last-layer gradients during the first epochs (original).
+
+        Mirrors ``utils.cancel_gradients_last_layer`` in
+        ``facebookresearch/dino``: while ``current_epoch < freeze_last_layer``
+        the last-layer gradients are dropped after backward, keeping the
+        output prototypes fixed at init.
+        """
+        if self.current_epoch < self.freeze_last_layer:
+            for p in self.student.head.last_layer.parameters():
+                if p.grad is not None:
+                    p.grad = None
 
     def validation_step(self, batch, batch_idx):
         student_views, teacher_views = batch

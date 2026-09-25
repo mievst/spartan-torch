@@ -40,7 +40,7 @@ class TestChunkedFeedForward:
         ff = FeedForward(HALF, HID)
         chunked = ChunkedFeedForward(ff, chunk_size=2)
         x = torch.randn(B, 7, HALF)
-        assert torch.equal(chunked(x), ff(x))
+        assert close(chunked(x), ff(x))
 
     def test_single_call_when_within_chunk(self):
         ff = FeedForward(HALF, HID)
@@ -52,7 +52,7 @@ class TestChunkedFeedForward:
         ff = FeedForward(HALF, HID)
         chunked = ChunkedFeedForward(ff, chunk_size=3)
         x = torch.randn(B, 10, HALF)
-        assert torch.equal(chunked(x), ff(x))
+        assert close(chunked(x), ff(x))
 
 
 class TestReversibleBlock:

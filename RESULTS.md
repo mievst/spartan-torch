@@ -28,12 +28,39 @@ Parity и бенчмарки `spartan-torch`. Parity-таблица генери
   `expansion=1` у нас Identity (в tv реальный conv — задокументировано),
   stride-2 собирается с `use_skip=False` (в tv shortcut дропается, не
   проецируется)
+- DINO `DINOHead` ← `facebookresearch/dino` — `DINOProjectionHead`
+  (block-level, random-weights; `weight_g/v` → `parametrizations.original0/1`).
+  Граница: паблишнутых весов головы нет (hub-чеки — только backbone), поэтому
+  только офлайн-parity, без pretrained-ноги
+- DINO ViT-S/16 backbone ← `dino_deitsmall16_pretrain.pth` (torch.hub) —
+  `CompatViTSmall` (backbone-фичи, таблица ниже; k-NN 74.5 — число из hubconf)
+- Mamba-1 `MambaMixer` ← `state-spaces/mamba-130m-hf` — `mixer[0]`
+  (mixer-блок после norm; `published top-1` нет — у блока нет головы, `nan`)
+- Mamba-1 `MambaMixer` ← `mamba-ssm` `Mamba` / HF `MambaMixer` —
+  block-level, random-weights (офлайн; ssm-нога — skip без пакета).
+  Граница: префилл побитово с референсом; чанкед/декод несёт ~1e-4 дрейф
+  (порядок суммирования conv × усиление рекуррентностью — у самого HF
+  префилл-vs-декод ~9e-4, см. docstring `MambaMixer`)
+- Mamba-2 `Mamba2Mixer` ← `AntonV/mamba2-130m-hf` — `mixer[0]`
+  (нативный HF-чек; для official `.bin` те же веса, группы `G=1, N=128` —
+  подтверждено конфигом конверсии). Офлайн-ноги: HF random-weights,
+  `mamba-ssm` `Mamba2` (skip без пакета). `published top-1` нет — `nan`
+- Mamba-3 `Mamba3Mixer` ← `ib-ssm/mamba3-370M-10BT` — `mixer[0]`
+  (настоящие веса, strict-load; таблицы нет — runnable-референса нет:
+  официальные ядра только Linux/CUDA, в `transformers` Mamba-3 нет).
+  Покрытие: key-map на реальных весах + step-vs-prefill self-согласие
+  (`3.34e-06` на этом чеке). Офлайн-нога `mamba-ssm` `Mamba3` — skip без
+  пакета. Недоказуемые допущения (pairing SISO-RoPE, bias-до-ротации,
+  unfused==fused) — в docstring `Mamba3Mixer`
 
 <!-- parity:begin -->
 | arch | source | max abs diff | cosine | pred agreement | published top-1 |
 | --- | --- | --- | --- | --- | --- |
-| ViT-Base/16 | timm vit_base_patch16_224 (pretrained) | 5.72e-06 | 0.99999994 | 1.0000 | 81.80 |
+| ViT-Base/16 | timm vit_base_patch16_224 (pretrained) | 1.00e-05 | 0.99999988 | 1.0000 | 81.80 |
 | ResNet-18 | torchvision ResNet18_Weights.IMAGENET1K_V1 | 0.00e+00 | 1.00000000 | 1.0000 | 69.76 |
+| DINO ViT-S/16 (backbone) | dino_deitsmall16_pretrain.pth (torch.hub) | 0.00e+00 | 0.99999982 | 1.0000 | 74.50 |
+| Mamba-130m (mixer[0]) | state-spaces/mamba-130m-hf | 0.00e+00 | 1.00000000 | 1.0000 | nan |
+| Mamba2-130m (mixer[0]) | AntonV/mamba2-130m-hf | 0.00e+00 | 0.99999988 | 1.0000 | nan |
 <!-- parity:end -->
 
 `published top-1` — числа с карточек моделей (ImageNet-val), для контекста, не gate.
@@ -47,12 +74,27 @@ Parity и бенчмарки `spartan-torch`. Parity-таблица генери
 <!-- bench:begin -->
 env: torch 2.13.0+cu132 | NVIDIA GeForce RTX 3050 Ti Laptop GPU | cuda 13.2 | batch=8
 
-| variant | seq 256 | seq 512 | seq 1024 | seq 2048 | seq 4096 | seq 8192 |
-| --- | --- | --- | --- | --- | --- | --- |
-| mha_manual | 2.74ms / 72.1MB | 6.99ms / 196.1MB | 20.40ms / 636.1MB | 68.89ms / 2284.1MB | SPILL | OOM |
-| mha_sdpa | 2.13ms / 40.1MB | 5.58ms / 68.1MB | 15.65ms / 124.1MB | 51.88ms / 236.1MB | 192.88ms / 460.1MB | 760.48ms / 908.1MB |
-| linformer | 3.90ms / 92.1MB | 6.17ms / 156.1MB | 11.91ms / 284.1MB | 23.37ms / 540.1MB | 47.03ms / 1052.1MB | 95.35ms / 2076.1MB |
-| performer | 4.85ms / 82.5MB | 9.38ms / 152.9MB | 18.20ms / 292.2MB | 36.22ms / 575.2MB | 72.25ms / 1132.2MB | 144.80ms / 2252.2MB |
-| linear | 3.31ms / 49.2MB | 4.77ms / 85.3MB | 9.03ms / 157.4MB | 17.70ms / 301.6MB | 35.40ms / 590.1MB | 71.33ms / 1167.1MB |
-| reformer | 13.28ms / 357.1MB | 25.77ms / 702.1MB | 50.70ms / 1392.0MB | 102.41ms / 2771.8MB | SPILL | SPILL |
+**prefill** (latency ms / peak mem)
+| variant | seq 256 | seq 512 | seq 1024 | seq 2048 | seq 4096 | seq 8192 | seq 16384 | seq 32768 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| mha_manual | 2.50ms / 68.1MB | 6.84ms / 188.1MB | 20.25ms / 620.1MB | 68.38ms / 2252.1MB | SPILL | OOM | OOM | OOM |
+| mha_sdpa | 1.99ms / 36.1MB | 5.49ms / 60.1MB | 15.71ms / 108.1MB | 52.01ms / 204.1MB | 195.30ms / 396.1MB | 767.02ms / 780.1MB | 3078.40ms / 1548.1MB | 9854.88ms / 3084.1MB |
+| linformer | 3.02ms / 112.1MB | 6.04ms / 172.1MB | 11.50ms / 292.1MB | 23.01ms / 532.1MB | 46.73ms / 1012.1MB | 95.21ms / 1972.1MB | 1175.66ms / 3892.1MB | SPILL |
+| performer | 4.76ms / 78.2MB | 9.44ms / 144.2MB | 18.62ms / 276.2MB | 36.87ms / 540.2MB | 74.01ms / 1068.2MB | 147.45ms / 2124.2MB | SPILL | SPILL |
+| linear | 1.90ms / 45.2MB | 4.80ms / 77.3MB | 8.81ms / 141.4MB | 17.92ms / 269.6MB | 34.64ms / 526.1MB | 70.17ms / 1039.1MB | 155.25ms / 2065.1MB | SPILL |
+| reformer | 11.78ms / 353.1MB | 22.92ms / 694.1MB | 45.86ms / 1376.0MB | 90.45ms / 2739.8MB | SPILL | SPILL | OOM | OOM |
+| mamba1 | 79.40ms / 83.7MB | 135.88ms / 152.2MB | 283.29ms / 289.2MB | 538.50ms / 563.2MB | 1150.53ms / 1111.2MB | 2361.43ms / 2207.2MB | SPILL | SPILL |
+| mamba2 | 34.76ms / 669.4MB | 70.30ms / 1318.2MB | 509.57ms / 2615.8MB | SPILL | OOM | OOM | OOM | OOM |
+| mamba3_siso | 113.94ms / 85.0MB | 224.36ms / 151.5MB | 448.55ms / 282.5MB | 840.44ms / 546.5MB | 1721.56ms / 1074.5MB | 3983.82ms / 2130.5MB | SPILL | SPILL |
+| mamba3_mimo | 197.11ms / 255.1MB | 394.51ms / 485.1MB | 806.75ms / 942.1MB | 1619.10ms / 1858.1MB | 6451.66ms / 3690.1MB | SPILL | ? | ? |
+
+**decode** (latency ms/step / peak mem)
+| variant | seq 256 | seq 512 | seq 1024 | seq 2048 | seq 4096 | seq 8192 | seq 16384 | seq 32768 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| mha_manual | 0.61ms / 34.8MB | 0.72ms / 54.9MB | 1.19ms / 95.2MB | 2.14ms / 175.7MB | 4.04ms / 336.7MB | OOM | OOM | OOM |
+| mha_sdpa | 0.65ms / 34.7MB | 1.11ms / 54.7MB | 1.64ms / 94.7MB | 3.07ms / 174.7MB | 5.69ms / 334.7MB | 11.10ms / 654.7MB | 21.76ms / 1294.8MB | 680.36ms / 2574.9MB |
+| mamba1 | 1.21ms / 22.2MB | 1.23ms / 26.2MB | 1.25ms / 34.2MB | 1.26ms / 50.2MB | 1.29ms / 82.2MB | 1.22ms / 146.2MB | 1.20ms / 274.2MB | 1.71ms / 530.2MB |
+| mamba2 | 1.62ms / 31.4MB | 1.76ms / 35.4MB | 1.56ms / 43.4MB | 1.45ms / 59.4MB | 1.85ms / 91.4MB | OOM | OOM | OOM |
+| mamba3_siso | 1.99ms / 36.7MB | 1.99ms / 40.7MB | 1.90ms / 48.7MB | 1.96ms / 64.7MB | 1.94ms / 96.7MB | 1.92ms / 160.7MB | 2.24ms / 288.7MB | 2.29ms / 544.7MB |
+| mamba3_mimo | 2.71ms / 71.8MB | 3.68ms / 75.8MB | 3.44ms / 83.8MB | 2.56ms / 99.8MB | 2.35ms / 131.8MB | 2.45ms / 195.8MB | 16.43ms / 323.8MB | OOM |
 <!-- bench:end -->

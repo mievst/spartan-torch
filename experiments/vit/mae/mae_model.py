@@ -99,16 +99,17 @@ class _ViTEncoder(nn.Module):
         Parameters
         ----------
         x : torch.Tensor
-            Image patches ``(B, L, embed_dim)`` after `ids_keep` selection,
-            i.e. unmasked tokens only.
+            Image patches ``(B, L_keep, embed_dim)`` after `ids_keep`
+            selection, i.e. unmasked tokens only. Positional embeddings
+            must already be added *before* masking (see `MAEModel.forward`),
+            so the kept tokens carry their original spatial positions
+            despite the shuffled `ids_keep` order.
 
         Returns
         -------
         torch.Tensor
             Encoded ``(B, L_keep, embed_dim)``.
         """
-        L = x.size(1)
-        x = x + self.pos_embed[:, :L]
         for block in self.blocks:
             x, _ = block(x)
         return self.norm(x)
@@ -251,6 +252,12 @@ class MAEModel(nn.Module):
             pixels), ``mask`` (B, L, bool).
         """
         tokens = self.encoder.patch_embed(image)
+        # Positional embeddings carry the spatial origin of each patch, so
+        # they must be added BEFORE masking: ids_keep is shuffled, and adding
+        # pos_embed[:, :L_keep] after the gather would assign positions 0..L_keep
+        # to randomly ordered tokens (He et al., 2021, Fig. 1: pos is added to
+        # the full set, then tokens are sampled).
+        tokens = tokens + self.encoder.pos_embed[:, : self.num_patches]
         ids_keep, ids_restore = self.masking(image.size(0), self.num_patches, image.device)
         visible = torch.gather(tokens, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, tokens.size(-1)))
         encoded = self.encoder(visible)
@@ -263,6 +270,8 @@ class MAEModel(nn.Module):
         loss = self.head(decoder_out, image, mask)
         # decoder_out is already in the original token order (the decoder
         # reassembled it via ids_restore) — no second gather here.
-        pred = self.head.patch_norm(self.head.projector(decoder_out))
+        # pred is the RAW projector output (same space the loss optimizes);
+        # do NOT patch_norm it — target alone is normalized.
+        pred = self.head.projector(decoder_out)
         target = self.head.patch_norm(self.head._to_patches(image))
         return {"loss": loss, "pred": pred, "target": target, "mask": mask}

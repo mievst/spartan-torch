@@ -152,3 +152,4 @@ temp/
 # Coverage threshold badge
 coverage-badge.svg
 _check_nb.py
+*lightning_logs

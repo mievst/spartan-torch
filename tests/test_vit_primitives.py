@@ -107,6 +107,39 @@ class TestLearnablePositionEmbedding:
         assert x.grad is not None
         assert layer.pos_embed.grad is not None
 
+    def test_native_grid_is_identity(self):
+        # 8x8 patch grid + CLS, as learned for 32x32 images with patch 4.
+        layer = LearnablePositionEmbedding(max_len=65, embed_dim=32)
+        torch.manual_seed(0)
+        x = torch.randn(2, 65, 32)
+        assert torch.equal(layer.forward_grid(x, 8, 8), layer(x))
+
+    def test_interpolated_grid_shape_and_cls(self):
+        layer = LearnablePositionEmbedding(max_len=65, embed_dim=32)
+        table = layer.interpolate_grid(4, 4)  # 16x16 local crop, patch 4
+        assert table.shape == (1, 17, 32)
+        assert torch.equal(table[:, :1], layer.pos_embed[:, :1])
+        torch.manual_seed(0)
+        x = torch.randn(2, 17, 32)
+        out = layer.forward_grid(x, 4, 4)
+        assert torch.allclose(out, x + table)
+
+    def test_interpolation_gradient_flow(self):
+        layer = LearnablePositionEmbedding(max_len=65, embed_dim=32)
+        x = torch.randn(2, 17, 32, requires_grad=True)
+        layer.forward_grid(x, 4, 4).sum().backward()
+        assert x.grad is not None
+        assert layer.pos_embed.grad is not None
+
+    def test_interpolation_validates_grid(self):
+        with pytest.raises(ValueError, match="square"):
+            LearnablePositionEmbedding(max_len=11, embed_dim=8).interpolate_grid(2, 2)
+        layer = LearnablePositionEmbedding(max_len=65, embed_dim=8)
+        with pytest.raises(ValueError, match="positive"):
+            layer.interpolate_grid(0, 4)
+        with pytest.raises(IndexError, match="exceeds interpolated"):
+            layer.forward_grid(torch.randn(1, 66, 8), 8, 8)
+
 
 class TestComposition:
     def test_full_pipeline(self):

@@ -20,28 +20,41 @@ class TestDINOProjectionHead:
         out = head(x)
         assert out.shape == (4, 65536)
 
-    def test_l2_normalized(self):
+    def test_bottleneck_normalized_before_last_layer(self):
+        import torch.nn.functional as F
+
         head = DINOProjectionHead(in_dim=128, hidden_dim=256, out_dim=512)
+        bottleneck = F.normalize(head.mlp(torch.randn(8, 128)), dim=-1, p=2)
+        assert torch.allclose(bottleneck.norm(dim=-1), torch.ones(8), atol=1e-5)
+        # final logits are NOT normalized (softmaxed with temperature in DINOLoss)
         out = head(torch.randn(8, 128))
-        assert torch.allclose(out.norm(dim=-1), torch.ones(8), atol=1e-5)
+        assert not torch.allclose(out.norm(dim=-1), torch.ones(8), atol=1e-5)
 
     def test_gradient_flow(self):
-        head = DINOProjectionHead(in_dim=64, hidden_dim=128, out_dim=256)
+        head = DINOProjectionHead(
+            in_dim=64, hidden_dim=128, out_dim=256, norm_last_layer=False
+        )
         x = torch.randn(3, 64, requires_grad=True)
         out = head(x)
         out.sum().backward()
         assert x.grad is not None
-        assert head.last_linear.weight.grad is not None
+        grads = [p.grad for p in head.last_linear.parameters()]
+        assert any(g is not None for g in grads)
 
-    def test_norm_last_layer_weight_norm(self):
+    def test_norm_last_layer_freezes_weight_g(self):
         head = DINOProjectionHead(64, 128, 256, norm_last_layer=True)
         assert hasattr(head.last_linear, "parametrizations")
+        weight_g = head.last_linear.parametrizations.weight.original0
+        assert torch.allclose(weight_g.data, torch.ones_like(weight_g.data))
+        assert not weight_g.requires_grad
         bare = DINOProjectionHead(64, 128, 256, norm_last_layer=False)
-        assert not hasattr(bare.last_linear, "parametrizations")
+        assert hasattr(bare.last_linear, "parametrizations")
+        bare_g = bare.last_linear.parametrizations.weight.original0
+        assert bare_g.requires_grad
 
     def test_nb_layers_validated(self):
         with pytest.raises(ValueError, match="nb_layers"):
-            DINOProjectionHead(64, 128, 256, nb_layers=1)
+            DINOProjectionHead(64, 128, 256, nb_layers=0)
 
 
 class TestCentering:

@@ -89,16 +89,19 @@ class VisionTransformer(nn.Module):
         Parameters
         ----------
         x : torch.Tensor
-            Input images, ``(B, C, H, W)``.
+            Input images, ``(B, C, H, W)``. ``H``/``W`` may differ from
+            ``img_size`` (e.g. multi-crop local views): the positional table
+            is bicubic-interpolated to the input patch grid.
 
         Returns
         -------
         torch.Tensor
             Logits, ``(B, num_classes)``.
         """
+        _, _, h, w = x.shape
         x = self.patch_embed(x)
         x = self.cls_token(x)
-        x = self.pos_embed(x)
+        x = self.pos_embed.forward_grid(x, h // self.patch_size, w // self.patch_size)
 
         for block in self.encoder:
             x, _ = block(x)

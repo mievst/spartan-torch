@@ -1,0 +1,27 @@
+name: publish
+
+# Production release to PyPI. Triggered by pushing a version tag:
+#   git tag v0.0.1 && git push origin v0.0.1
+# Auth is Trusted Publishing (OIDC) — no tokens. The PyPI project needs a
+# pending publisher for this repo + this workflow file (one-time setup in
+# PyPI project Settings → Publishing).
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v5
+      - name: Tag matches pyproject version
+        run: test "${GITHUB_REF_NAME#v}" = "$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
+      - run: uv build
+      - run: uv publish

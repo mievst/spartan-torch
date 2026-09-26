@@ -16,13 +16,32 @@ on:
 
 jobs:
   unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra dev --extra experiments
+      - run: uv run python -m pytest -m "not pretrained and not bench"
+
+  unit-experimental:
+    # Python 3.15: fresh release, third-party extras (lightning,
+    # transformers, jupyter) may lag behind with wheels. Informational
+    # only — never blocks PRs, do NOT add to required checks.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
       - run: uv sync --extra dev --extra experiments
       - run: uv run python -m pytest -m "not pretrained and not bench"
 

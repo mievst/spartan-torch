@@ -31,9 +31,12 @@ jobs:
       - run: uv run python -m pytest -m "not pretrained and not bench"
 
   unit-experimental:
-    # Python 3.15: fresh release, third-party extras (lightning,
-    # transformers, jupyter) may lag behind with wheels. Informational
-    # only — never blocks PRs, do NOT add to required checks.
+    # Python 3.15: fresh release, heavy extras lag behind (mlflow → pyarrow
+    # has no cp315 wheel and can't build from source here). So this job syncs
+    # core-only (torch + torchvision both ship cp315) and runs whichever unit
+    # tests don't need the missing extras — they self-skip via
+    # pytest.importorskip. Informational only — never blocks PRs, do NOT add
+    # to required checks.
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -44,8 +47,8 @@ jobs:
           # 3.15 final lands ~Oct 2026; track the RC until then.
           python-version: "3.15"
           allow-prereleases: true
-      - run: uv sync --extra dev --extra experiments
-      - run: uv run python -m pytest -m "not pretrained and not bench"
+      - run: uv sync
+      - run: uv run --with pytest python -m pytest -m "not pretrained and not bench"
 
   parity-pretrained:
     # Downloads timm/torchvision weights; runs weekly, on main, or on demand.

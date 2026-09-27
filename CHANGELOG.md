@@ -58,3 +58,5 @@ GitHub Release notes.
   (+ slice of `IMAGENET1K_V1`); `compat/hf_llama.py`.
 - `ChunkedFeedForward` tests: `allclose` instead of exact equality
   (chunked GEMMs legitimately differ at ulp level across BLAS builds).
+- `torch.compile` tests skip on Python 3.15+ (unsupported by torch itself);
+  DINO view tests skip without the `lightning` extra (`importorskip`).

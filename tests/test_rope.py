@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 import torch
 
@@ -6,6 +8,9 @@ from spartan_torch import RotaryPositionalEmbedding
 B, H, S, D = 2, 4, 8, 16
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+COMPILE = pytest.mark.skipif(
+    sys.version_info >= (3, 15), reason="torch.compile does not support Python 3.15+"
+)
 
 
 def close(a, b, tol=1e-5):
@@ -151,6 +156,7 @@ def test_cuda_forward():
     assert rope.rotate(long_x).shape == long_x.shape
 
 
+@COMPILE
 def test_torch_compile():
     rope = torch.compile(RotaryPositionalEmbedding(D).eval(), backend="eager")
     q = torch.randn(B, H, S, D)

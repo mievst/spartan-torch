@@ -1,4 +1,5 @@
 import math
+import sys
 
 import pytest
 import torch
@@ -14,6 +15,9 @@ from spartan_torch.transformers.attention.performer import (
 B, N, IN, OUT, HS, NH = 2, 32, 64, 64, 16, 4
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+COMPILE = pytest.mark.skipif(
+    sys.version_info >= (3, 15), reason="torch.compile does not support Python 3.15+"
+)
 
 
 @pytest.fixture()
@@ -222,6 +226,7 @@ class TestPerformerAttention:
         layer = make(num_features=16384, is_causal=True).cuda().half().eval()
         assert torch.isfinite(layer(x, x, x)).all()
 
+    @COMPILE
     def test_compile(self, tensors):
         x = tensors
         layer = torch.compile(make(is_causal=True).eval(), backend="eager")

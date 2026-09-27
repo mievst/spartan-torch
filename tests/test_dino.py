@@ -180,6 +180,7 @@ class TestDINOLossViewAlignment:
     (local student views have no teacher target)."""
 
     def _lightning(self):
+        pytest.importorskip("lightning", reason="needs lightning extra")
         from experiments.vit.dino.dino_model import DINOLightning
 
         torch.manual_seed(0)

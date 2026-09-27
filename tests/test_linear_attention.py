@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -8,6 +10,9 @@ from spartan_torch import LinearTransformerAttention
 B, Q, K, IN, OUT, HS, NH = 2, 5, 7, 16, 20, 8, 4
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+COMPILE = pytest.mark.skipif(
+    sys.version_info >= (3, 15), reason="torch.compile does not support Python 3.15+"
+)
 
 
 @pytest.fixture()
@@ -149,6 +154,7 @@ class TestLinearTransformerAttention:
         layer = make().cuda().half().eval()
         assert torch.isfinite(layer(q, kv, kv)).all()
 
+    @COMPILE
     @pytest.mark.parametrize("is_causal", [False, True])
     def test_compile(self, tensors, is_causal):
         q, kv = tensors

@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -7,6 +9,9 @@ from spartan_torch import ReformerAttention
 B, N, IN, OUT, HS, NH = 2, 9, 16, 20, 8, 4
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+COMPILE = pytest.mark.skipif(
+    sys.version_info >= (3, 15), reason="torch.compile does not support Python 3.15+"
+)
 
 
 @pytest.fixture()
@@ -161,6 +166,7 @@ class TestReformerAttention:
         layer = make().cuda().half().eval()
         assert torch.isfinite(layer(x, x, x)).all()
 
+    @COMPILE
     def test_compile(self, tensors):
         x = tensors
         layer = torch.compile(make(is_causal=True).eval(), backend="eager")

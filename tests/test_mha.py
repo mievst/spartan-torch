@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 import torch
 
@@ -6,6 +8,9 @@ from spartan_torch import MultiHeadAttention, RotaryPositionalEmbedding
 B, Q, K, IN, OUT, HS, NH = 2, 5, 7, 16, 20, 8, 4
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+COMPILE = pytest.mark.skipif(
+    sys.version_info >= (3, 15), reason="torch.compile does not support Python 3.15+"
+)
 
 
 @pytest.fixture()
@@ -320,6 +325,7 @@ class TestKVCache:
 
 
 class TestCompile:
+    @COMPILE
     def test_torch_compile(self, tensors):
         q, kv = tensors
         mc = torch.compile(MultiHeadAttention(IN, HS, NH, OUT).eval(), backend="eager")

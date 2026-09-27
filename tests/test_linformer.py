@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 import torch
 from torch import nn
@@ -8,6 +10,9 @@ B, Q, K, IN, OUT, HS, NH = 2, 5, 7, 16, 20, 8, 4
 PROJ_K, MAX_SEQ = 3, 8
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+COMPILE = pytest.mark.skipif(
+    sys.version_info >= (3, 15), reason="torch.compile does not support Python 3.15+"
+)
 
 
 @pytest.fixture()
@@ -252,6 +257,7 @@ class TestGradients:
             out = la(q.half(), kv.half(), kv.half())
             assert not torch.isnan(out).any()
 
+    @COMPILE
     def test_torch_compile(self, tensors):
         q, kv = tensors
         mc = torch.compile(make().eval(), backend="eager")

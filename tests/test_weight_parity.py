@@ -693,8 +693,15 @@ class TestMamba2130mPretrainedParity:
         torch.manual_seed(0)
         norm = model.backbone.layers[0].norm
         x = norm(torch.randn(2, 8, cfg.hidden_size))
+        # Gate note: mixer outputs reach |y| ~ 90, so fp32 ulp-level
+        # cross-BLAS summation drift lands at ~1e-5 absolute (reference
+        # Windows build reproduces HF bitwise with max_diff 0.0; ubuntu CI
+        # sees 1.1e-5). The relaxed absolute bound absorbs only that noise —
+        # the cosine gate stays at full strength.
         with torch.no_grad():
-            max_diff, cos = assert_parity(ours(x)[0], ref(x))
+            max_diff, cos = parity_metrics(ours(x)[0], ref(x))
+        assert max_diff < 5e-5, f"max abs diff {max_diff:.3e} >= 5e-5"
+        assert cos > MIN_COSINE, f"cosine {cos:.8f} <= {MIN_COSINE}"
         print(f"\nmamba2-130m-hf mixer[0] parity: max_diff={max_diff:.2e} cos={cos:.8f}")
 
 

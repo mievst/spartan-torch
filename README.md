@@ -1,8 +1,8 @@
 # spartan-torch
 
 [![CI](https://github.com/mievst/spartan-torch/actions/workflows/ci.yml/badge.svg)](https://github.com/mievst/spartan-torch/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/spartan-torch.svg)](https://pypi.org/project/spartan-torch/)
-[![Python](https://img.shields.io/pypi/pyversions/spartan-torch.svg)](https://pypi.org/project/spartan-torch/)
+[![PyPI](https://img.shields.io/pypi/v/spartan-torch.svg?style=flat)](https://pypi.org/project/spartan-torch/)
+[![Python](https://img.shields.io/pypi/pyversions/spartan-torch.svg?style=flat)](https://pypi.org/project/spartan-torch/)
 
 Custom layers and building blocks for PyTorch — assemble and fine-tune models fast.
 

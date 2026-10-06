@@ -8,6 +8,8 @@ GitHub Release notes.
 
 ## Unreleased
 
+## 0.0.1 — 2026-10-07
+
 ### Added
 
 - SSM mixers: `MambaMixer` / `MambaBlock`, `Mamba2Mixer` / `Mamba2Block`,
